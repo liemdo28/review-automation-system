@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Locations - Review System{% endblock %}
+{% block content %}
+<h1>Locations</h1>
+
+<div class="location-grid">
+    {% for item in locations %}
+    <div class="location-card location-card-large">
+        <h2>{{ item.loc.name }}</h2>
+        <p class="location-address">{{ item.loc.address }}</p>
+        <p class="text-muted">{{ item.loc.city }}, {{ item.loc.state }}</p>
+
+        <div class="location-detail-stats">
+            <div class="stat-row">
+                <span class="badge badge-google">Google</span>
+                <span>{{ item.google_count }} reviews</span>
+                {% if item.loc.fetch_google %}
+                <span class="status-active">Active</span>
+                {% else %}
+                <span class="status-inactive">Paused</span>
+                {% endif %}
+            </div>
+            <div class="stat-row">
+                <span class="badge badge-yelp">Yelp</span>
+                <span>{{ item.yelp_count }} reviews</span>
+                {% if item.loc.fetch_yelp %}
+                <span class="status-active">Active</span>
+                {% else %}
+                <span class="status-inactive">Paused</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if item.last_fetch %}
+        <p class="text-muted">Last fetch: {{ item.last_fetch.strftime('%m/%d/%Y %H:%M') }}</p>
+        {% else %}
+        <p class="text-muted">Never fetched</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

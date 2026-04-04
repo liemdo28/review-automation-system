@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Review #{{ review.id }} - Review System{% endblock %}
+{% block content %}
+<a href="/reviews" class="back-link">&larr; Back to Reviews</a>
+
+<div class="review-detail">
+    <div class="review-header">
+        <h1>Review #{{ review.id }}</h1>
+        <span class="badge badge-{{ review.platform }}">{{ review.platform }}</span>
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-card">
+            <h3>Review</h3>
+            <div class="review-meta">
+                <strong>{{ review.reviewer_name or 'Anonymous' }}</strong>
+                <span class="rating-{{ 'positive' if review.rating >= 4 else 'negative' }}">
+                    {{ '\u2b50' * review.rating }} ({{ review.rating }}/5)
+                </span>
+                {% if review.review_date %}
+                <span class="text-muted">{{ review.review_date.strftime('%B %d, %Y') }}</span>
+                {% endif %}
+            </div>
+            <p class="review-body">{{ review.review_text or '(No text)' }}</p>
+            {% if location %}
+            <p class="text-muted">{{ location.name }} - {{ location.address }}</p>
+            {% endif %}
+        </div>
+
+        <div class="detail-card">
+            <h3>AI Reply</h3>
+            {% if reply %}
+            <div class="reply-status">
+                Status: <span class="status-{{ reply.status }}">{{ reply.status }}</span>
+                {% if reply.is_dry_run %}<span class="badge badge-dry-run">DRY RUN</span>{% endif %}
+            </div>
+            <textarea class="reply-editor" id="replyText" rows="6">{{ reply.ai_reply_text }}</textarea>
+            <div class="reply-actions">
+                {% if reply.status in ['pending', 'email_sent', 'suggested'] %}
+                <button class="btn btn-green" onclick="approveReply({{ review.id }})">Approve & Post</button>
+                {% endif %}
+                <button class="btn" onclick="copyReply()">Copy Reply</button>
+            </div>
+            {% if reply.posted_at %}
+            <p class="text-muted">Posted: {{ reply.posted_at.strftime('%m/%d/%Y %H:%M') }}</p>
+            {% endif %}
+            {% else %}
+            <p class="text-muted">No AI reply generated yet.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Job History</h3>
+        <table class="data-table">
+            <thead>
+                <tr><th>Type</th><th>Status</th><th>Retries</th><th>Queued</th><th>Completed</th><th>Error</th></tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td>{{ job.job_type }}</td>
+                    <td><span class="status-{{ job.status }}">{{ job.status }}</span></td>
+                    <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
+                    <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
+                    <td>{{ job.completed_at.strftime('%m/%d %H:%M') if job.completed_at else '-' }}</td>
+                    <td class="error-text">{{ job.error_message or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

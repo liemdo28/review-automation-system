@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Review System{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ total_reviews }}</div>
+        <div class="stat-label">Total Reviews</div>
+    </div>
+    <div class="stat-card stat-green">
+        <div class="stat-value">{{ total_posted }}</div>
+        <div class="stat-label">Replies Posted</div>
+    </div>
+    <div class="stat-card stat-yellow">
+        <div class="stat-value">{{ total_pending }}</div>
+        <div class="stat-label">Pending Review</div>
+    </div>
+    <div class="stat-card stat-blue">
+        <div class="stat-value">{{ total_suggested }}</div>
+        <div class="stat-label">Yelp Suggestions</div>
+    </div>
+</div>
+
+<div class="section-row">
+    <div class="section">
+        <h2>Locations</h2>
+        <div class="location-grid">
+            {% for item in locations %}
+            <div class="location-card">
+                <h3>{{ item.loc.name }}</h3>
+                <p class="location-address">{{ item.loc.address }}</p>
+                <div class="location-stats">
+                    <span>{{ item.review_count }} reviews</span>
+                    {% if item.last_fetch %}
+                    <span class="text-muted">Last fetch: {{ item.last_fetch.strftime('%m/%d %H:%M') }}</span>
+                    {% else %}
+                    <span class="text-muted">Never fetched</span>
+                    {% endif %}
+                </div>
+                <div class="location-badges">
+                    {% if item.loc.fetch_google %}<span class="badge badge-google">Google</span>{% endif %}
+                    {% if item.loc.fetch_yelp %}<span class="badge badge-yelp">Yelp</span>{% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-header">
+        <h2>Recent Activity</h2>
+        <button class="btn btn-sm" onclick="triggerFetch()">Fetch Now</button>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Review ID</th>
+                <th>Retries</th>
+                <th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in recent_jobs %}
+            <tr>
+                <td><span class="badge badge-{{ job.job_type }}">{{ job.job_type }}</span></td>
+                <td><span class="status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ job.review_id or '-' }}</td>
+                <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
+                <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+            {% if not recent_jobs %}
+            <tr><td colspan="5" class="text-center text-muted">No jobs yet. Click "Fetch Now" to start.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
