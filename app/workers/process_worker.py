@@ -7,12 +7,18 @@ from sqlalchemy import select
 from app.database import SyncSessionLocal
 from app.models import Job
 from app.redis import default_queue
-from app.workers.reply_worker import task_generate_reply, task_post_reply, task_send_alert_email
+from app.workers.reply_worker import (
+    task_analyze_review,
+    task_generate_reply,
+    task_post_reply,
+    task_send_alert_email,
+)
 
 logger = logging.getLogger("review_system.process_worker")
 
 TASK_MAP = {
-    "generate_reply": task_generate_reply,
+    "analyze_review": task_analyze_review,
+    "generate_reply": task_generate_reply,   # legacy compat
     "post_reply": task_post_reply,
     "send_alert_email": task_send_alert_email,
 }

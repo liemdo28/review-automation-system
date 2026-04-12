@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Metrics - Review System{% endblock %}
+{% block content %}
+<h1>Metrics &amp; KPIs</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ total }}</div>
+        <div class="stat-label">Total Reviews</div>
+    </div>
+    <div class="stat-card stat-blue">
+        <div class="stat-value">{{ new_today }}</div>
+        <div class="stat-label">New Today</div>
+    </div>
+    <div class="stat-card stat-blue">
+        <div class="stat-value">{{ new_week }}</div>
+        <div class="stat-label">New This Week</div>
+    </div>
+    <div class="stat-card stat-green">
+        <div class="stat-value">{{ auto_replied }}</div>
+        <div class="stat-label">Auto-Replied</div>
+    </div>
+    <div class="stat-card stat-yellow">
+        <div class="stat-value">{{ awaiting }}</div>
+        <div class="stat-label">Awaiting Approval</div>
+    </div>
+    <div class="stat-card stat-red">
+        <div class="stat-value">{{ escalated }}</div>
+        <div class="stat-label">Escalated</div>
+    </div>
+    <div class="stat-card stat-orange">
+        <div class="stat-value">{{ sensitive }}</div>
+        <div class="stat-label">Sensitive Reviews</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ avg_rating }}</div>
+        <div class="stat-label">Avg Rating (out of 5)</div>
+    </div>
+    <div class="stat-card stat-green">
+        <div class="stat-value">{{ auto_reply_rate }}%</div>
+        <div class="stat-label">Auto-Reply Rate</div>
+    </div>
+</div>
+
+<div class="section-row" style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <!-- Sentiment Breakdown -->
+    <div class="section">
+        <h2>Sentiment Breakdown</h2>
+        <table class="data-table">
+            <thead><tr><th>Sentiment</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>
+                {% for sentiment, count in sentiments.items() %}
+                <tr>
+                    <td><span class="sentiment-{{ sentiment }}">{{ sentiment }}</span></td>
+                    <td>{{ count }}</td>
+                    <td>{{ ((count / total * 100) | round(1)) if total else 0 }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Platform Breakdown -->
+    <div class="section">
+        <h2>Platform Breakdown</h2>
+        <table class="data-table">
+            <thead><tr><th>Platform</th><th>Reviews</th><th>%</th></tr></thead>
+            <tbody>
+                {% for platform, count in platforms.items() %}
+                <tr>
+                    <td><span class="badge badge-{{ platform }}">{{ platform }}</span></td>
+                    <td>{{ count }}</td>
+                    <td>{{ ((count / total * 100) | round(1)) if total else 0 }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Top Complaint Categories -->
+<div class="section">
+    <h2>Top Complaint Categories</h2>
+    {% if top_issues %}
+    <table class="data-table">
+        <thead><tr><th>Issue Type</th><th>Count</th><th>Bar</th></tr></thead>
+        <tbody>
+            {% set max_count = top_issues[0][1] if top_issues else 1 %}
+            {% for issue, count in top_issues %}
+            <tr>
+                <td><span class="badge badge-issue">{{ issue.replace('_', ' ') }}</span></td>
+                <td>{{ count }}</td>
+                <td>
+                    <div style="background:var(--accent);height:12px;border-radius:3px;width:{{ (count / max_count * 200)|int }}px"></div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No complaint data yet — reviews need to be analyzed first.</p>
+    {% endif %}
+</div>
+
+<!-- Quick Links -->
+<div class="section">
+    <h2>Quick Filters</h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="/reviews?status=escalated" class="btn">View Escalated</a>
+        <a href="/reviews?status=awaiting_approval" class="btn">View Pending Approval</a>
+        <a href="/reviews?urgency=high" class="btn">High Urgency</a>
+        <a href="/reviews?platform=yelp" class="btn">Yelp Reviews</a>
+        <a href="/reviews?rating_lte=3" class="btn">Low Rated (≤3★)</a>
+        <a href="/api/reviews/report/daily" class="btn btn-sm" target="_blank">Daily Report (JSON)</a>
+        <a href="/api/reviews/report/weekly" class="btn btn-sm" target="_blank">Weekly Report (JSON)</a>
+    </div>
+</div>
+{% endblock %}

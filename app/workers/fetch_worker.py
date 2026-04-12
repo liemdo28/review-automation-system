@@ -1,14 +1,19 @@
-"""Scheduled worker: fetch reviews from Google + Yelp every 10 minutes."""
+"""
+Fetch Worker
+============
+Scheduled worker that fetches reviews from Google Business Profile and Yelp.
+Each new review is stored with status="new" and an analyze_review job is enqueued.
+Consecutive fetch failures trigger an admin alert email after the configured threshold.
+"""
 import logging
 import time
-import asyncio
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import AsyncSessionLocal
-from app.models import Location, Review, FetchLog, Job
+from app.models import Location, Review, FetchLog, Job, ReviewAction
 from app.services.google_auth import get_access_token
 from app.services.google_reviews import list_reviews
 from app.services.ai_reply import normalize_rating
@@ -37,10 +42,13 @@ async def fetch_all_reviews():
     logger.info("=== Fetch cycle complete ===")
 
 
+# ── Google fetch ─────────────────────────────────────────────────────────────
+
 async def _fetch_google(loc: Location):
     start = time.time()
     new_count = 0
     error_msg = None
+    reviews = []
 
     try:
         token = await get_access_token(
@@ -63,8 +71,11 @@ async def _fetch_google(loc: Location):
                 reviewer_name = r.get("reviewer", {}).get("displayName", "Anonymous")
                 comment = (r.get("comment") or "").strip()
                 has_reply = r.get("reviewReply") is not None
-                review_date_str = r.get("createTime")
+                existing_reply_text = (r.get("reviewReply") or {}).get("comment") if has_reply else None
+                review_url = r.get("reviewUrl") or ""
+
                 review_date = None
+                review_date_str = r.get("createTime")
                 if review_date_str:
                     try:
                         review_date = datetime.fromisoformat(review_date_str.replace("Z", "+00:00"))
@@ -78,32 +89,40 @@ async def _fetch_google(loc: Location):
                     reviewer_name=reviewer_name,
                     rating=rating,
                     review_text=comment,
+                    review_url=review_url,
                     review_date=review_date,
                     has_existing_reply=has_reply,
+                    existing_reply_text=existing_reply_text,
                     raw_data=r,
-                ).on_conflict_do_nothing(constraint="uq_review_platform_id")
+                    status="new",
+                ).on_conflict_do_update(
+                    constraint="uq_review_platform_id",
+                    set_={
+                        # Refresh reply status if it changed on the platform
+                        "has_existing_reply": has_reply,
+                        "existing_reply_text": existing_reply_text,
+                    },
+                )
 
                 result = await session.execute(stmt)
                 if result.rowcount > 0:
                     new_count += 1
 
             await session.commit()
-
-            # Enqueue jobs for new reviews that don't already have replies
             if new_count > 0:
-                await _enqueue_new_review_jobs(session, loc, "google")
+                await _enqueue_analyze_jobs(session, loc, "google")
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[Google] {loc.name}: fetch failed - {e}")
+        logger.error(f"[Google] {loc.name}: fetch failed — {e}")
+        await _check_and_alert_fetch_failure(loc, "google", str(e))
 
     duration_ms = int((time.time() - start) * 1000)
-
     async with AsyncSessionLocal() as session:
         session.add(FetchLog(
             location_id=loc.id,
             platform="google",
-            reviews_found=len(reviews) if not error_msg else 0,
+            reviews_found=len(reviews),
             new_reviews=new_count,
             errors=error_msg,
             duration_ms=duration_ms,
@@ -114,26 +133,28 @@ async def _fetch_google(loc: Location):
         logger.info(f"[Google] {loc.name}: {new_count} new reviews saved")
 
 
+# ── Yelp fetch ────────────────────────────────────────────────────────────────
+
 async def _fetch_yelp(loc: Location):
-    """Fetch Yelp reviews using Playwright. Imports lazily to avoid startup cost."""
     start = time.time()
     new_count = 0
     error_msg = None
     reviews_found = 0
+    scraped = []
 
     try:
         from app.services.yelp_scraper import scrape_yelp_reviews
-        reviews, stats = await scrape_yelp_reviews(
+        scraped, stats = await scrape_yelp_reviews(
             url=loc.yelp_url,
             max_reviews=20,
             business_name=loc.name,
             location_name=f"{loc.city}, {loc.state}" if loc.city else "",
         )
-        reviews_found = len(reviews)
+        reviews_found = len(scraped)
         logger.info(f"[Yelp] {loc.name}: scraped {reviews_found} reviews")
 
         async with AsyncSessionLocal() as session:
-            for r in reviews:
+            for r in scraped:
                 review_id = r.get("id", r.get("review_id", ""))
                 if not review_id:
                     continue
@@ -150,6 +171,7 @@ async def _fetch_yelp(loc: Location):
                     review_date=None,
                     has_existing_reply=False,
                     raw_data=r,
+                    status="new",
                 ).on_conflict_do_nothing(constraint="uq_review_platform_id")
 
                 result = await session.execute(stmt)
@@ -157,16 +179,15 @@ async def _fetch_yelp(loc: Location):
                     new_count += 1
 
             await session.commit()
-
             if new_count > 0:
-                await _enqueue_new_review_jobs(session, loc, "yelp")
+                await _enqueue_analyze_jobs(session, loc, "yelp")
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"[Yelp] {loc.name}: fetch failed - {e}")
+        logger.error(f"[Yelp] {loc.name}: fetch failed — {e}")
+        await _check_and_alert_fetch_failure(loc, "yelp", str(e))
 
     duration_ms = int((time.time() - start) * 1000)
-
     async with AsyncSessionLocal() as session:
         session.add(FetchLog(
             location_id=loc.id,
@@ -182,19 +203,25 @@ async def _fetch_yelp(loc: Location):
         logger.info(f"[Yelp] {loc.name}: {new_count} new reviews saved")
 
 
-async def _enqueue_new_review_jobs(session, loc: Location, platform: str):
-    """Create generate_reply jobs for new reviews without existing replies."""
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _enqueue_analyze_jobs(session, loc: Location, platform: str):
+    """Create analyze_review jobs for new reviews without an existing job."""
     from sqlalchemy import and_
-    from app.models import Reply
 
     result = await session.execute(
         select(Review).where(
             and_(
                 Review.location_id == loc.id,
                 Review.platform == platform,
+                Review.status == "new",
                 Review.has_existing_reply == False,  # noqa: E712
-                ~Review.id.in_(select(Reply.review_id)),
-                ~Review.id.in_(select(Job.review_id).where(Job.job_type == "generate_reply")),
+                ~Review.id.in_(
+                    select(Job.review_id).where(
+                        Job.job_type == "analyze_review",
+                        Job.status.in_(["queued", "processing"]),
+                    )
+                ),
             )
         )
     )
@@ -202,12 +229,48 @@ async def _enqueue_new_review_jobs(session, loc: Location, platform: str):
 
     for review in new_reviews:
         session.add(Job(
-            job_type="generate_reply",
+            job_type="analyze_review",
             review_id=review.id,
             location_id=loc.id,
             status="queued",
         ))
+        session.add(ReviewAction(
+            review_id=review.id,
+            action_type="fetched",
+            action_status="success",
+            action_payload_json={"platform": platform, "location": loc.name},
+            performed_by="system",
+        ))
+        review.status = "pending_analysis"
 
     await session.commit()
     if new_reviews:
-        logger.info(f"Enqueued {len(new_reviews)} generate_reply jobs for {loc.name} ({platform})")
+        logger.info(f"Enqueued {len(new_reviews)} analyze_review jobs for {loc.name} ({platform})")
+
+
+async def _check_and_alert_fetch_failure(loc: Location, platform: str, error_msg: str):
+    """If consecutive fetch failures exceed threshold, send an admin alert."""
+    from app.services.email_alert import send_fetch_failure_alert
+
+    if not settings.alert_email_to:
+        return
+
+    async with AsyncSessionLocal() as session:
+        recent_logs = (await session.execute(
+            select(FetchLog)
+            .where(FetchLog.location_id == loc.id, FetchLog.platform == platform)
+            .order_by(FetchLog.fetched_at.desc())
+            .limit(settings.fetch_failure_alert_threshold)
+        )).scalars().all()
+
+    consecutive_failures = sum(1 for log in recent_logs if log.errors)
+
+    if consecutive_failures >= settings.fetch_failure_alert_threshold:
+        send_fetch_failure_alert(
+            to_email=settings.alert_email_to,
+            platform=platform,
+            store=loc.name,
+            error_message=error_msg,
+            consecutive_failures=consecutive_failures,
+            app_url=settings.app_url,
+        )
