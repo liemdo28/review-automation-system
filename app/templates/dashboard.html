@@ -14,67 +14,108 @@
     </div>
     <div class="stat-card stat-yellow">
         <div class="stat-value">{{ total_pending }}</div>
-        <div class="stat-label">Pending Review</div>
+        <div class="stat-label">Awaiting Approval</div>
+    </div>
+    <div class="stat-card stat-red">
+        <div class="stat-value">{{ total_escalated }}</div>
+        <div class="stat-label">Escalated</div>
+    </div>
+    <div class="stat-card stat-orange">
+        <div class="stat-value">{{ total_sensitive }}</div>
+        <div class="stat-label">Sensitive Reviews</div>
     </div>
     <div class="stat-card stat-blue">
         <div class="stat-value">{{ total_suggested }}</div>
         <div class="stat-label">Yelp Suggestions</div>
     </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ queued_jobs }}</div>
+        <div class="stat-label">Queued Jobs</div>
+    </div>
 </div>
 
-<div class="section-row">
-    <div class="section">
-        <h2>Locations</h2>
-        <div class="location-grid">
-            {% for item in locations %}
-            <div class="location-card">
-                <h3>{{ item.loc.name }}</h3>
-                <p class="location-address">{{ item.loc.address }}</p>
-                <div class="location-stats">
-                    <span>{{ item.review_count }} reviews</span>
-                    {% if item.last_fetch %}
-                    <span class="text-muted">Last fetch: {{ item.last_fetch.strftime('%m/%d %H:%M') }}</span>
-                    {% else %}
-                    <span class="text-muted">Never fetched</span>
-                    {% endif %}
-                </div>
-                <div class="location-badges">
-                    {% if item.loc.fetch_google %}<span class="badge badge-google">Google</span>{% endif %}
-                    {% if item.loc.fetch_yelp %}<span class="badge badge-yelp">Yelp</span>{% endif %}
-                </div>
-            </div>
+{% if urgent_items %}
+<div class="section" style="border-color:#f87171">
+    <div class="section-header">
+        <h2 style="color:#f87171">&#9888; Needs Attention ({{ urgent_items|length }})</h2>
+        <a href="/reviews?status=escalated" class="btn btn-sm">View All Escalated</a>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr><th>Status</th><th>Platform</th><th>Store</th><th>Reviewer</th><th>Rating</th><th>Sensitive</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for item in urgent_items %}
+            <tr>
+                <td><span class="status-{{ item.review.status }}">{{ item.review.status }}</span></td>
+                <td><span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span></td>
+                <td>{{ item.location.name if item.location else '-' }}</td>
+                <td>{{ item.review.reviewer_name or 'Anonymous' }}</td>
+                <td class="rating-{{ 'positive' if item.review.rating >= 4 else 'negative' }}">
+                    {{ '\u2605' * item.review.rating }}
+                </td>
+                <td>{% if item.review.is_sensitive %}<span class="badge badge-sensitive">SENSITIVE</span>{% else %}-{% endif %}</td>
+                <td><a href="/reviews/{{ item.review.id }}" class="btn btn-sm">Review</a></td>
+            </tr>
             {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="section">
+    <h2>Locations</h2>
+    <div class="location-grid">
+        {% for item in locations %}
+        <div class="location-card">
+            <h3>{{ item.loc.name }}</h3>
+            <p class="location-address">{{ item.loc.address }}</p>
+            <div class="location-stats">
+                <span>{{ item.review_count }} reviews</span>
+                {% if item.last_fetch %}
+                <span class="text-muted">Last: {{ item.last_fetch.strftime('%m/%d %H:%M') }}</span>
+                {% else %}
+                <span class="text-muted">Never fetched</span>
+                {% endif %}
+            </div>
+            <div class="location-badges">
+                {% if item.loc.fetch_google %}<span class="badge badge-google">Google</span>{% endif %}
+                {% if item.loc.fetch_yelp %}<span class="badge badge-yelp">Yelp</span>{% endif %}
+            </div>
         </div>
+        {% endfor %}
     </div>
 </div>
 
 <div class="section">
     <div class="section-header">
         <h2>Recent Activity</h2>
-        <button class="btn btn-sm" onclick="triggerFetch()">Fetch Now</button>
+        <div>
+            <button class="btn btn-sm" onclick="triggerSync('all')">Sync All</button>
+            <button class="btn btn-sm" onclick="triggerSync('google')">Google</button>
+            <button class="btn btn-sm" onclick="triggerSync('yelp')">Yelp</button>
+        </div>
     </div>
     <table class="data-table">
         <thead>
-            <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Review ID</th>
-                <th>Retries</th>
-                <th>Time</th>
-            </tr>
+            <tr><th>Type</th><th>Status</th><th>Review</th><th>Retries</th><th>Time</th><th>Error</th></tr>
         </thead>
         <tbody>
             {% for job in recent_jobs %}
             <tr>
-                <td><span class="badge badge-{{ job.job_type }}">{{ job.job_type }}</span></td>
+                <td><span class="badge badge-job">{{ job.job_type }}</span></td>
                 <td><span class="status-{{ job.status }}">{{ job.status }}</span></td>
-                <td>{{ job.review_id or '-' }}</td>
+                <td>
+                    {% if job.review_id %}<a href="/reviews/{{ job.review_id }}">#{{ job.review_id }}</a>
+                    {% else %}-{% endif %}
+                </td>
                 <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
                 <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
+                <td class="error-text">{{ (job.error_message or '')[:60] or '-' }}</td>
             </tr>
             {% endfor %}
             {% if not recent_jobs %}
-            <tr><td colspan="5" class="text-center text-muted">No jobs yet. Click "Fetch Now" to start.</td></tr>
+            <tr><td colspan="6" class="text-center text-muted">No jobs yet. Click "Sync All" to start.</td></tr>
             {% endif %}
         </tbody>
     </table>
