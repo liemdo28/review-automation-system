@@ -19,10 +19,25 @@ async function launchSessionBootstrap(sourceId, sourceLabel = "source", platform
             throw new Error(data.detail || "Bootstrap launch failed.");
         }
         alert(
-            `Login window opened for ${sourceLabel} (${platform}). Sign in there, stay on the correct review page, then press ENTER in the START login window to save that session.`,
+            `Login window opened for ${sourceLabel} (${platform}). Sign in there, open the exact review page for that source, then press ENTER in the START login window. START will save both the session and the exact review URL for that source when it can detect it.`,
         );
     } catch (error) {
         alert("Failed to launch login bootstrap: " + error.message);
+    }
+}
+
+async function launchSharedPlatformLogin(sourceId, platform = "source") {
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/bootstrap?share_scope=platform`, { method: "POST" });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.detail || "Shared login launch failed.");
+        }
+        alert(
+            `Shared ${platform} login window opened. Sign in once, keep the review page open, then press ENTER in the START login window. START will apply that session to all ${platform} sources.`,
+        );
+    } catch (error) {
+        alert("Failed to launch shared login: " + error.message);
     }
 }
 

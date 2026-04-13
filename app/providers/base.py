@@ -84,12 +84,50 @@ class ReviewProvider(ABC):
         return max(0, min(5, round(float(match.group(1)))))
 
     @staticmethod
+    def normalize_text(text: str | None) -> str | None:
+        if text is None:
+            return None
+
+        cleaned = text.replace("\xa0", " ").strip()
+        if not cleaned:
+            return None
+
+        suspicious_tokens = ("Ã", "Â", "Ä", "â", "ð", "\x85")
+        if any(token in cleaned for token in suspicious_tokens):
+            try:
+                repaired = cleaned.encode("latin1").decode("utf-8")
+                if repaired and repaired != cleaned:
+                    cleaned = repaired
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                pass
+
+        return cleaned
+
+    @staticmethod
     def parse_datetime(text: str | None) -> datetime | None:
         if not text:
             return None
 
-        raw = text.strip()
+        raw = ReviewProvider.normalize_text(text) or ""
         now = datetime.utcnow()
+        vi_relative = re.match(
+            r"(\d+)\s+(phút|giờ|ngày|tuần|tháng|năm)\s+trước",
+            raw,
+            re.IGNORECASE,
+        )
+        if vi_relative:
+            value = int(vi_relative.group(1))
+            unit = vi_relative.group(2).lower()
+            deltas = {
+                "phút": timedelta(minutes=value),
+                "giờ": timedelta(hours=value),
+                "ngày": timedelta(days=value),
+                "tuần": timedelta(weeks=value),
+                "tháng": timedelta(days=value * 30),
+                "năm": timedelta(days=value * 365),
+            }
+            return now - deltas.get(unit, timedelta())
+
         relative = re.match(
             r"(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago",
             raw,

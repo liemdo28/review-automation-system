@@ -6,10 +6,13 @@ build/
 .venv/
 venv/
 .env
+.sessions/
 .run/
 *.db
 *.sqlite3
 *.log
+tmp-*.png
+tmp-*.json
 .claude/
 node_modules/
 credentials.json

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     # Web collector sessions
     session_storage_dir: str = ".sessions"
+    google_browser_proxy: str = ""
+    yelp_browser_proxy: str = ""
+    google_login_url: str = "https://www.google.com/"
+    yelp_login_url: str = "https://biz.yelp.com/login"
+    review_browser_locale: str = "en-US"
+    review_browser_timezone: str = "America/Los_Angeles"
 
     # Email
     smtp_host: str = "smtp.gmail.com"

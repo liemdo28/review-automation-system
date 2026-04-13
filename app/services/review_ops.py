@@ -46,7 +46,19 @@ def resolve_date_range(filters: ReviewFilters) -> tuple[datetime | None, datetim
     return None, None
 
 
+def placeholder_google_review_clause():
+    return and_(
+        Review.platform == "google",
+        Review.external_review_id.like("google-%"),
+        Review.rating == 0,
+        Review.review_date.is_(None),
+        or_(Review.reviewer_name == "Anonymous", Review.reviewer_name.is_(None)),
+    )
+
+
 def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
+    query = query.where(not_(placeholder_google_review_clause()))
+
     if filters.location_id:
         query = query.where(Review.location_id == filters.location_id)
     if filters.platform:
