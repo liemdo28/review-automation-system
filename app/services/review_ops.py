@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import Select, and_, exists, func, not_, or_, select
+from sqlalchemy.orm import aliased
 
 from app.models import Job, Reply, Review
 
@@ -57,6 +58,11 @@ def placeholder_google_review_clause():
 
 
 def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
+    reply_exists = aliased(Reply)
+    reply_status_exists = aliased(Reply)
+    failed_reply_exists = aliased(Reply)
+    failed_job_exists = aliased(Job)
+
     query = query.where(not_(placeholder_google_review_clause()))
 
     if filters.location_id:
@@ -77,7 +83,13 @@ def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
             and_(
                 Review.is_handled.is_(False),
                 or_(Review.has_owner_reply.is_(False), Review.has_owner_reply.is_(None)),
-                not_(exists(select(Reply.id).where(and_(Reply.review_id == Review.id, Reply.status == "posted")))),
+                not_(
+                    exists(
+                        select(reply_status_exists.id).where(
+                            and_(reply_status_exists.review_id == Review.id, reply_status_exists.status == "posted")
+                        )
+                    )
+                ),
             )
         )
 
@@ -87,28 +99,51 @@ def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
             and_(
                 Review.is_handled.is_(False),
                 or_(Review.has_owner_reply.is_(False), Review.has_owner_reply.is_(None)),
-                not_(exists(select(Reply.id).where(Reply.review_id == Review.id))),
+                not_(exists(select(reply_exists.id).where(reply_exists.review_id == Review.id))),
             )
         )
     elif status == "replied":
         query = query.where(Review.has_owner_reply.is_(True))
     elif status == "pending_review":
         query = query.where(
-            exists(select(Reply.id).where(and_(Reply.review_id == Review.id, Reply.status.in_(PENDING_REPLY_STATUSES))))
+            exists(
+                select(reply_status_exists.id).where(
+                    and_(
+                        reply_status_exists.review_id == Review.id,
+                        reply_status_exists.status.in_(PENDING_REPLY_STATUSES),
+                    )
+                )
+            )
         )
     elif status == "approved":
         query = query.where(
-            exists(select(Reply.id).where(and_(Reply.review_id == Review.id, Reply.status == "approved")))
+            exists(
+                select(reply_status_exists.id).where(
+                    and_(reply_status_exists.review_id == Review.id, reply_status_exists.status == "approved")
+                )
+            )
         )
     elif status == "posted":
         query = query.where(
-            exists(select(Reply.id).where(and_(Reply.review_id == Review.id, Reply.status == "posted")))
+            exists(
+                select(reply_status_exists.id).where(
+                    and_(reply_status_exists.review_id == Review.id, reply_status_exists.status == "posted")
+                )
+            )
         )
     elif status == "failed":
         query = query.where(
             or_(
-                exists(select(Reply.id).where(and_(Reply.review_id == Review.id, Reply.status == "failed"))),
-                exists(select(Job.id).where(and_(Job.review_id == Review.id, Job.status == "failed"))),
+                exists(
+                    select(failed_reply_exists.id).where(
+                        and_(failed_reply_exists.review_id == Review.id, failed_reply_exists.status == "failed")
+                    )
+                ),
+                exists(
+                    select(failed_job_exists.id).where(
+                        and_(failed_job_exists.review_id == Review.id, failed_job_exists.status == "failed")
+                    )
+                ),
             )
         )
     elif status == "handled":
