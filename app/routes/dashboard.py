@@ -21,7 +21,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 @router.get("/")
 async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
     summary = {
         "total_unreplied_reviews": await count_reviews(db),

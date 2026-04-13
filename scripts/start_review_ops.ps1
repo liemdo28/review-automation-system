@@ -99,7 +99,7 @@ if (Test-Path $webPidPath) {
     if ($existingPid) {
         $existingProcess = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
         if ($existingProcess) {
-            Write-Host "Review Ops is already running at http://127.0.0.1:$Port"
+            Write-Host "START is already running at http://127.0.0.1:$Port"
             if ($OpenBrowser) {
                 Start-Process "http://127.0.0.1:$Port"
             }
@@ -127,7 +127,7 @@ if ($OpenBrowser) {
 }
 
 Write-Host ""
-Write-Host "Review Ops started."
+Write-Host "START started."
 Write-Host "URL: http://127.0.0.1:$Port"
 Write-Host "PID: $($process.Id)"
 Write-Host "Logs: $webLogPath"

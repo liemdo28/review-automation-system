@@ -15,6 +15,8 @@ The system moves from a platform-specific fetch implementation into a provider-b
 - `app/workers/fetch_worker.py`
   Iterates `review_sources`, validates session state, fetches normalized reviews, updates source health, and queues reply generation only for unreplied reviews.
 
+There is no dependency on Google Business Profile review APIs in the live ingestion path. Collection is web-first and page-driven.
+
 ### Provider interface design
 
 Every provider must implement:
@@ -70,6 +72,7 @@ Implemented in [002_review_ops_phase1.py](/E:/Project/Master/review-automation-s
 - Existing raw JSON copied into `raw_payload`.
 - Existing timestamps backfilled into `collected_at`, `first_seen_at`, `last_seen_at`.
 - Existing location Google/Yelp settings materialized into `review_sources`.
+- Existing Google sources are backfilled to web collector URLs in [004_web_source_urls_only.py](/E:/Project/Master/review-automation-system/alembic/versions/004_web_source_urls_only.py).
 
 ## Proposed folder and file changes
 
@@ -166,6 +169,7 @@ Implemented in [002_review_ops_phase1.py](/E:/Project/Master/review-automation-s
 - Selectors should stay configurable inside `review_sources.settings`.
 - The collector should only read visible review data and merchant response state.
 - Posting remains operator-assisted for now.
+- Legacy Google OAuth/API modules have been removed from the active code path.
 
 ### Yelp collector
 
@@ -228,7 +232,6 @@ Operational status mapping:
 
 ### Current blockers
 
-- No admin UI yet for uploading or validating session references.
 - No secure secret-manager-backed session storage yet.
 - No automated posting flow for portal-based sources, by design.
 

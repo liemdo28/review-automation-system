@@ -1,10 +1,14 @@
-# Review Automation System v1.0
+# START v1.0
 
 Review operations dashboard for **Raw Sushi Bistro** and **Bakudan Ramen** restaurants. It collects Google Business and Yelp reviews through configurable providers, surfaces unreplied reviews first, and prepares AI-assisted reply suggestions for staff.
 
+This app does not rely on Google or Yelp review APIs for collection. It opens review pages on the web, reuses an authorized staff session where needed, and pulls review data directly from the visible page content.
+
 ## One-Click Start on Windows
 
-Double-click [start-review-ops.bat](/E:/Project/Master/review-automation-system/start-review-ops.bat).
+Double-click [start.bat](/E:/Project/Master/review-automation-system/start.bat).
+
+Or use [start-review-ops.bat](/E:/Project/Master/review-automation-system/start-review-ops.bat) if you prefer the longer name.
 
 The launcher will:
 
@@ -17,7 +21,7 @@ The launcher will:
 - seed locations
 - launch the web app at `http://127.0.0.1:8000`
 
-To stop the local app, double-click [stop-review-ops.bat](/E:/Project/Master/review-automation-system/stop-review-ops.bat).
+To stop the local app, double-click [stop.bat](/E:/Project/Master/review-automation-system/stop.bat) or [stop-review-ops.bat](/E:/Project/Master/review-automation-system/stop-review-ops.bat).
 
 ## Architecture
 
@@ -75,6 +79,7 @@ Dashboard: http://localhost:8000
 - **PostgreSQL 16** + SQLAlchemy 2.0 + Alembic
 - **Redis 7** + optional rq mode
 - **Playwright** provider collectors
+- **Web-first ingestion** using source URLs plus operator-managed sessions
 - **OpenAI** GPT-4o-mini
 - **APScheduler** for fetch and processing cycles
 - **Docker Compose** for local PostgreSQL + Redis

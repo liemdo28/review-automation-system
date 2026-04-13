@@ -1,4 +1,4 @@
-"""FastAPI application with APScheduler for review automation."""
+"""FastAPI application with APScheduler for START review operations."""
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -29,7 +29,7 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Review System starting up...")
+    logger.info("START is starting up...")
     logger.info(f"DRY_RUN={settings.dry_run}")
     logger.info(f"Fetch interval: {settings.fetch_interval_minutes}m")
 
@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     scheduler.shutdown(wait=False)
-    logger.info("Review System shut down")
+    logger.info("START shut down")
 
 
 async def _run_process_worker():
@@ -70,7 +70,7 @@ async def _run_process_worker():
 # ── App ──────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Review Automation System",
+    title="START",
     version="1.0.0",
     lifespan=lifespan,
 )

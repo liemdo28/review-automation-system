@@ -10,10 +10,10 @@ if (Test-Path $webPidPath) {
         $process = Get-Process -Id $appPid -ErrorAction SilentlyContinue
         if ($process) {
             Stop-Process -Id $appPid -Force
-            Write-Host "Stopped Review Ops process $appPid"
+            Write-Host "Stopped START process $appPid"
         }
     }
     Remove-Item $webPidPath -Force -ErrorAction SilentlyContinue
 } else {
-    Write-Host "No running Review Ops PID file found."
+    Write-Host "No running START PID file found."
 }
