@@ -3,10 +3,8 @@ import logging
 from datetime import datetime, timezone
 
 from app.database import SyncSessionLocal
-from app.models import Review, Reply, Job, Location, EmailAlert
-from app.services.ai_reply import generate_reply_sync
-from app.services.google_auth import get_access_token_sync
-from app.services.google_reviews import reply_to_review_sync
+from app.models import EmailAlert, Job, Location, Reply, ReplySuggestion, Review
+from app.services.ai_reply import generate_reply_bundle_sync
 from app.services.email_alert import send_low_rating_alert
 from app.config import settings
 
@@ -45,7 +43,8 @@ def task_generate_reply(job_id: int):
 
         # Generate AI reply
         loc_str = f"{location.city}, {location.state}" if location.city else location.address or ""
-        reply_text = generate_reply_sync(
+        tone_mode = (job.payload or {}).get("tone_mode", settings.default_reply_tone)
+        reply_bundle = generate_reply_bundle_sync(
             review_text=review.review_text or "",
             rating=review.rating,
             reviewer_name=review.reviewer_name or "Guest",
@@ -53,42 +52,54 @@ def task_generate_reply(job_id: int):
             location=loc_str,
             api_key=settings.openai_api_key,
             model=settings.openai_model,
+            tone_mode=tone_mode,
         )
 
         # Save reply
         reply = Reply(
             review_id=review.id,
-            ai_reply_text=reply_text,
+            ai_reply_text=reply_bundle["suggestion_text"],
             ai_model=settings.openai_model,
+            tone_mode=tone_mode,
+            confidence_note=reply_bundle.get("confidence_note"),
+            reason_summary=reply_bundle.get("reason_summary"),
+            issue_tags=reply_bundle.get("issue_tags"),
+            risk_flags=reply_bundle.get("risk_flags"),
             status="pending",
             is_dry_run=settings.dry_run,
         )
         session.add(reply)
         session.flush()
 
-        # Route based on platform + rating
-        if review.platform == "google" and review.rating >= 4:
-            # Auto-post for positive Google reviews
-            next_job = Job(
-                job_type="post_reply",
+        session.add(
+            ReplySuggestion(
                 review_id=review.id,
-                location_id=location.id,
-                status="queued",
-                payload={"reply_id": reply.id},
+                tone_mode=tone_mode,
+                suggestion_text=reply_bundle["suggestion_text"],
+                model_name=settings.openai_model,
+                sentiment=reply_bundle.get("sentiment"),
+                issue_tags=reply_bundle.get("issue_tags"),
+                risk_flags=reply_bundle.get("risk_flags"),
+                confidence_note=reply_bundle.get("confidence_note"),
+                reason_summary=reply_bundle.get("reason_summary"),
+                created_by="system",
             )
-            session.add(next_job)
-        elif review.platform == "google" and review.rating <= 3:
-            # Email alert for negative Google reviews
+        )
+
+        # Route based on platform + rating
+        if review.rating <= 3:
+            # High-risk reviews still trigger attention for managers.
             next_job = Job(
                 job_type="send_alert_email",
                 review_id=review.id,
                 location_id=location.id,
+                source_id=job.source_id,
                 status="queued",
                 payload={"reply_id": reply.id},
             )
             session.add(next_job)
+            reply.status = "pending"
         else:
-            # Yelp: suggest only, mark as approved (viewable on dashboard)
             reply.status = "suggested"
 
         job.status = "completed"
@@ -135,49 +146,14 @@ def task_post_reply(job_id: int):
             session.commit()
             return
 
-        if settings.dry_run:
-            reply.status = "posted"
-            reply.is_dry_run = True
-            reply.posted_at = datetime.now(timezone.utc)
-            job.status = "completed"
-            job.result = {"dry_run": True}
-            job.completed_at = datetime.now(timezone.utc)
-            session.commit()
-            logger.info(f"[DRY RUN] Reply for review {review.id} marked as posted")
-            return
-
-        # Post to Google
-        try:
-            token = get_access_token_sync(
-                settings.google_client_id,
-                settings.google_client_secret,
-                settings.google_refresh_token,
-            )
-            account_id = location.google_account_id or settings.google_account_id
-            reply_to_review_sync(
-                token, account_id, location.google_location_id,
-                review.platform_review_id, reply.ai_reply_text,
-            )
-
-            reply.status = "posted"
-            reply.posted_at = datetime.now(timezone.utc)
-            job.status = "completed"
-            job.result = {"posted": True}
-            job.completed_at = datetime.now(timezone.utc)
-            session.commit()
-            logger.info(f"Reply posted for review {review.id} at {location.name}")
-
-        except Exception as e:
-            job.retry_count += 1
-            if job.retry_count >= job.max_retries:
-                job.status = "failed"
-                reply.status = "failed"
-                reply.error_message = str(e)[:500]
-            else:
-                job.status = "queued"  # Will be re-processed
-            job.error_message = str(e)[:500]
-            session.commit()
-            logger.error(f"Post reply failed (attempt {job.retry_count}): {e}")
+        # Portal posting is intentionally operator-assisted for now.
+        reply.status = "approved"
+        reply.is_dry_run = settings.dry_run
+        job.status = "completed"
+        job.result = {"posted": False, "mode": "operator_assisted", "dry_run": settings.dry_run}
+        job.completed_at = datetime.now(timezone.utc)
+        session.commit()
+        logger.info("Reply approved for review %s at %s; waiting for manual portal posting", review.id, location.name)
 
     except Exception as e:
         logger.error(f"task_post_reply failed for job {job_id}: {e}")

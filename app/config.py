@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    default_reply_tone: str = "gentle_professional"
 
     # Email
     smtp_host: str = "smtp.gmail.com"
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
     fetch_interval_minutes: int = 10
     process_interval_minutes: int = 1
     max_retries: int = 3
+    job_execution_mode: str = "inline"
     log_level: str = "INFO"
     secret_key: str = "change-this"
 

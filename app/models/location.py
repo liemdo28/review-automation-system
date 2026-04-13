@@ -27,3 +27,4 @@ class Location(Base):
     )
 
     reviews: Mapped[list["Review"]] = relationship(back_populates="location")
+    review_sources: Mapped[list["ReviewSource"]] = relationship(back_populates="location")
