@@ -44,6 +44,20 @@ class AuthSessionPayload(BaseModel):
     expires_at: datetime | None = None
 
 
+def _optional_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return int(value) if value else None
+
+
+def _optional_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return date.fromisoformat(value) if value else None
+
+
 @router.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
     try:
@@ -81,26 +95,30 @@ async def stats(db: AsyncSession = Depends(get_db)):
 
 @router.get("/reviews")
 async def list_reviews(
-    location_id: int | None = None,
+    location_id: str | None = None,
     platform: str | None = None,
-    rating: int | None = None,
+    rating: str | None = None,
     status: str | None = None,
     date_preset: str | None = "7d",
-    date_from: date | None = None,
-    date_to: date | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     needs_attention_only: bool = True,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
 ):
+    parsed_location_id = _optional_int(location_id)
+    parsed_rating = _optional_int(rating)
+    parsed_date_from = _optional_date(date_from)
+    parsed_date_to = _optional_date(date_to)
     filters = ReviewFilters(
-        location_id=location_id,
+        location_id=parsed_location_id,
         platform=platform,
-        rating=rating,
+        rating=parsed_rating,
         status=status,
         date_preset=date_preset,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
         needs_attention_only=needs_attention_only,
     )
     query = apply_review_filters(select(Review), filters).order_by(
