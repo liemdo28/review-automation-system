@@ -91,7 +91,7 @@ class GoogleReviewsPortalProvider(PageReviewProvider):
                 return
 
         page.on("response", capture_response)
-        target_url = self._maps_search_url(page.url or self.source.source_url)
+        target_url = self._maps_search_url(page.url or self._effective_source_url() or self.source.source_url)
         if target_url and target_url != page.url:
             await page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
         await page.wait_for_timeout(6000)

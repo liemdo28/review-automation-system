@@ -18,6 +18,7 @@ class ReviewSource(Base):
     location_id: Mapped[int] = mapped_column(ForeignKey("locations.id"), nullable=False)
     platform: Mapped[str] = mapped_column(String(16), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_source_url: Mapped[str | None] = mapped_column(Text)
     source_label: Mapped[str | None] = mapped_column(String(128))
     auth_mode: Mapped[str] = mapped_column(String(32), default="manual_session")
     session_status: Mapped[str] = mapped_column(String(32), default="unknown")
