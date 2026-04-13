@@ -8,7 +8,6 @@ import subprocess
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,6 +20,15 @@ from app.database import get_db
 from app.models import Job, Location, Reply, ReplySuggestion, Review, ReviewSource
 from app.services.ai_reply import generate_reply_bundle
 from app.services.review_ops import ReviewFilters, apply_review_filters, count_reviews, derive_review_status
+from app.services.session_resolution import (
+    build_shared_key,
+    effective_source_url,
+    is_shared_session,
+    normalize_source_url_override,
+    normalize_share_scope,
+    resolve_auth_session_for_source,
+)
+from app.services.review_views import count_review_listing, fetch_review_listing
 from app.workers.fetch_worker import fetch_all_reviews
 
 router = APIRouter(tags=["api"])
@@ -36,6 +44,7 @@ class BulkReviewAction(BaseModel):
 class SourceUpdatePayload(BaseModel):
     source_label: str | None = None
     source_url: str | None = None
+    resolved_source_url: str | None = None
     auth_mode: str | None = None
     session_status: str | None = None
     settings: dict | None = None
@@ -46,6 +55,8 @@ class AuthSessionPayload(BaseModel):
     session_reference: str
     status: str = "active"
     expires_at: datetime | None = None
+    share_scope: str | None = None
+    shared_key: str | None = None
     source_url_override: str | None = None
 
 
@@ -70,54 +81,39 @@ def _repo_path(value: str) -> Path:
     return REPO_ROOT / path
 
 
-def _normalized_source_url_override(platform: str, source_url_override: str | None) -> str | None:
-    if not source_url_override:
-        return None
-
-    candidate = source_url_override.strip()
-    lowered = candidate.lower()
-    platform = (platform or "").lower()
-
-    if platform == "google" and "/local/business/" in lowered and "/customers/reviews" in lowered:
-        return _force_google_review_language(candidate)
-    if platform == "yelp" and "yelp.com/biz/" in lowered:
-        return candidate
-    return None
-
-
-def _force_google_review_language(url: str) -> str:
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query["hl"] = "en"
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
-
-
 async def _store_session_for_sources(
     db: AsyncSession,
     sources: list[ReviewSource],
     *,
+    trace_source: ReviewSource,
     session_reference: str,
     status: str,
+    share_scope: str,
+    shared_key: str | None,
+    source_url_override: str | None = None,
     expires_at: datetime | None = None,
-) -> list[int]:
+) -> tuple[object, list[int]]:
     from app.models import AuthSession
 
     updated_source_ids: list[int] = []
     for target_source in sources:
-        db.add(
-            AuthSession(
-                source_id=target_source.id,
-                platform=target_source.platform,
-                session_reference=session_reference,
-                expires_at=expires_at,
-                last_validated_at=datetime.utcnow(),
-                status=status,
-            )
-        )
         target_source.session_status = status
         target_source.last_auth_at = datetime.utcnow()
         updated_source_ids.append(target_source.id)
-    return updated_source_ids
+
+    auth_session = AuthSession(
+        source_id=trace_source.id,
+        platform=trace_source.platform,
+        share_scope=share_scope,
+        shared_key=shared_key,
+        session_reference=session_reference,
+        source_url_override=source_url_override,
+        expires_at=expires_at,
+        last_validated_at=datetime.utcnow(),
+        status=status,
+    )
+    db.add(auth_session)
+    return auth_session, updated_source_ids
 
 
 @router.get("/health")
@@ -183,34 +179,20 @@ async def list_reviews(
         date_to=parsed_date_to,
         needs_attention_only=needs_attention_only,
     )
-    query = apply_review_filters(select(Review), filters).order_by(
+    order_by = (
         Review.review_date.desc().nullslast(),
         Review.last_seen_at.desc(),
     )
-    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
-    reviews = (await db.execute(query.limit(limit).offset(offset))).scalars().all()
+    total = await count_review_listing(db, filters=filters)
+    reviews = await fetch_review_listing(db, filters=filters, limit=limit, offset=offset, order_by=order_by)
 
     items = []
-    for review in reviews:
-        reply = (
-            await db.execute(select(Reply).where(Reply.review_id == review.id))
-        ).scalar_one_or_none()
-        latest_job = (
-            await db.execute(
-                select(Job).where(Job.review_id == review.id).order_by(Job.queued_at.desc()).limit(1)
-            )
-        ).scalar_one_or_none()
-        source = await db.get(ReviewSource, review.source_id) if review.source_id else None
-        location = await db.get(Location, review.location_id)
-        suggestion = (
-            await db.execute(
-                select(ReplySuggestion)
-                .where(ReplySuggestion.review_id == review.id)
-                .order_by(ReplySuggestion.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-
+    for item in reviews:
+        review = item.review
+        reply = item.reply
+        source = item.source
+        location = item.location
+        suggestion = item.suggestion
         items.append(
             {
                 "id": review.id,
@@ -225,7 +207,7 @@ async def list_reviews(
                 "source_url": review.source_url,
                 "suggested_ai_reply": suggestion.suggestion_text if suggestion else reply.ai_reply_text if reply else None,
                 "job_source_status": source.session_status if source else None,
-                "review_status": derive_review_status(review, reply, latest_job),
+                "review_status": item.status,
                 "is_handled": review.is_handled,
                 "tone_mode": suggestion.tone_mode if suggestion else reply.tone_mode if reply else None,
                 "reason_summary": suggestion.reason_summary if suggestion else reply.reason_summary if reply else None,
@@ -591,22 +573,40 @@ async def list_locations(db: AsyncSession = Depends(get_db)):
 @router.get("/sources")
 async def list_sources(db: AsyncSession = Depends(get_db)):
     sources = (await db.execute(select(ReviewSource).order_by(ReviewSource.location_id, ReviewSource.platform))).scalars().all()
-    return [
-        {
-            "id": source.id,
-            "location_id": source.location_id,
-            "platform": source.platform,
-            "source_url": source.source_url,
-            "source_label": source.source_label,
-            "auth_mode": source.auth_mode,
-            "session_status": source.session_status,
-            "last_auth_at": source.last_auth_at.isoformat() if source.last_auth_at else None,
-            "last_successful_sync_at": source.last_successful_sync_at.isoformat() if source.last_successful_sync_at else None,
-            "last_failed_sync_at": source.last_failed_sync_at.isoformat() if source.last_failed_sync_at else None,
-            "is_active": source.is_active,
-        }
-        for source in sources
-    ]
+    items = []
+    for source in sources:
+        location = await db.get(Location, source.location_id)
+        auth_session = await resolve_auth_session_for_source(db, source, location=location)
+        items.append(
+            {
+                "id": source.id,
+                "location_id": source.location_id,
+                "platform": source.platform,
+                "source_url": source.source_url,
+                "resolved_source_url": source.resolved_source_url,
+                "effective_source_url": effective_source_url(source, auth_session),
+                "source_label": source.source_label,
+                "auth_mode": source.auth_mode,
+                "session_status": source.session_status,
+                "last_auth_at": source.last_auth_at.isoformat() if source.last_auth_at else None,
+                "last_successful_sync_at": source.last_successful_sync_at.isoformat() if source.last_successful_sync_at else None,
+                "last_failed_sync_at": source.last_failed_sync_at.isoformat() if source.last_failed_sync_at else None,
+                "is_active": source.is_active,
+                "using_shared_session": is_shared_session(auth_session, source),
+                "effective_session": {
+                    "id": auth_session.id,
+                    "share_scope": auth_session.share_scope,
+                    "shared_key": auth_session.shared_key,
+                    "session_reference": auth_session.session_reference,
+                    "last_validated_at": auth_session.last_validated_at.isoformat() if auth_session.last_validated_at else None,
+                    "expires_at": auth_session.expires_at.isoformat() if auth_session.expires_at else None,
+                    "status": auth_session.status,
+                }
+                if auth_session
+                else None,
+            }
+        )
+    return items
 
 
 @router.patch("/sources/{source_id}")
@@ -633,11 +633,13 @@ async def create_source_session(
     if not source:
         raise HTTPException(404, "Source not found")
 
-    if share_scope not in {"source", "platform"}:
-        raise HTTPException(400, "share_scope must be 'source' or 'platform'")
+    resolved_share_scope = normalize_share_scope(payload.share_scope or share_scope)
+    if resolved_share_scope not in {"source", "platform", "account"}:
+        raise HTTPException(400, "share_scope must be 'source', 'platform', or 'account'")
 
     target_sources = [source]
-    if share_scope == "platform":
+    location = await db.get(Location, source.location_id)
+    if resolved_share_scope == "platform":
         target_sources = (
             await db.execute(
                 select(ReviewSource)
@@ -648,28 +650,58 @@ async def create_source_session(
                 .order_by(ReviewSource.location_id, ReviewSource.id)
             )
         ).scalars().all()
+    elif resolved_share_scope == "account":
+        account_id = location.google_account_id if location and source.platform == "google" else None
+        if account_id:
+            target_sources = (
+                await db.execute(
+                    select(ReviewSource)
+                    .join(Location, Location.id == ReviewSource.location_id)
+                    .where(
+                        ReviewSource.platform == source.platform,
+                        ReviewSource.is_active.is_(True),
+                        Location.google_account_id == account_id,
+                    )
+                    .order_by(ReviewSource.location_id, ReviewSource.id)
+                )
+            ).scalars().all()
 
-    updated_source_ids = await _store_session_for_sources(
+    resolved_shared_key = build_shared_key(
+        platform=source.platform,
+        share_scope=resolved_share_scope,
+        source_id=source.id,
+        location=location,
+        shared_key=payload.shared_key,
+    )
+
+    normalized_source_override = normalize_source_url_override(source.platform, payload.source_url_override)
+
+    auth_session, updated_source_ids = await _store_session_for_sources(
         db,
         target_sources,
+        trace_source=source,
         session_reference=payload.session_reference,
         status=payload.status,
+        share_scope=resolved_share_scope,
+        shared_key=resolved_shared_key,
+        source_url_override=normalized_source_override,
         expires_at=payload.expires_at,
     )
 
-    source_url_updated = False
-    source_url_override = _normalized_source_url_override(source.platform, payload.source_url_override)
-    if source_url_override and share_scope == "source":
-        source.source_url = source_url_override
-        source_url_updated = True
+    resolved_source_url_updated = False
+    if normalized_source_override:
+        source.resolved_source_url = normalized_source_override
+        resolved_source_url_updated = True
 
     await db.commit()
     return {
         "status": "ok",
-        "share_scope": share_scope,
+        "session_id": auth_session.id,
+        "share_scope": resolved_share_scope,
+        "shared_key": resolved_shared_key,
         "updated_source_ids": updated_source_ids,
-        "source_url_updated": source_url_updated,
-        "source_url": source.source_url if source_url_updated else None,
+        "source_url_updated": resolved_source_url_updated,
+        "source_url": source.resolved_source_url if resolved_source_url_updated else None,
     }
 
 
@@ -684,13 +716,14 @@ async def bootstrap_source_session(
         raise HTTPException(404, "Source not found")
     if not source.source_url:
         raise HTTPException(400, "Source URL is missing")
-    if share_scope not in {"source", "platform"}:
-        raise HTTPException(400, "share_scope must be 'source' or 'platform'")
+    resolved_share_scope = normalize_share_scope(share_scope)
+    if resolved_share_scope not in {"source", "platform", "account"}:
+        raise HTTPException(400, "share_scope must be 'source', 'platform', or 'account'")
 
     session_dir = _repo_path(settings.session_storage_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
-    if share_scope == "platform":
-        session_path = session_dir / f"platform-{source.platform}.json"
+    if resolved_share_scope == "platform":
+        session_path = session_dir / f"{source.platform}-shared-session.json"
         launch_label = f"All {source.platform.title()} Sources"
         if source.platform == "google":
             launch_url = settings.google_login_url
@@ -716,7 +749,7 @@ async def bootstrap_source_session(
         "-SourceId",
         str(source.id),
         "-ShareScope",
-        share_scope,
+        resolved_share_scope,
         "-Platform",
         source.platform,
         "-SourceUrl",
@@ -740,7 +773,7 @@ async def bootstrap_source_session(
     return {
         "status": "bootstrap_started",
         "source_id": source.id,
-        "share_scope": share_scope,
+        "share_scope": resolved_share_scope,
         "session_path": str(session_path),
         "platform": source.platform,
         "source_label": launch_label,

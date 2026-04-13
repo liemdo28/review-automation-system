@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import AsyncSessionLocal
 from app.models import AuthSession, EmailAlert, FetchLog, Job, Location, Reply, ReplySuggestion, Review, ReviewSource
 from app.providers import ProviderAuthRequiredError, ProviderFetchError, get_provider
+from app.services.session_resolution import effective_source_url, resolve_auth_session_for_source
 
 logger = logging.getLogger("review_system.fetch_worker")
 
@@ -57,9 +58,10 @@ async def _fetch_source(source_id: int) -> bool:
     async with AsyncSessionLocal() as session:
         source = await session.get(ReviewSource, source_id)
         location = await session.get(Location, source.location_id) if source else None
-        auth_session = await _latest_auth_session(session, source.id) if source else None
+        auth_session = await resolve_auth_session_for_source(session, source, location=location) if source else None
         if not source or not location:
             return False
+        source.effective_source_url = effective_source_url(source, auth_session)
 
     try:
         provider = get_provider(source, auth_session=auth_session)
@@ -100,34 +102,19 @@ async def _fetch_source(source_id: int) -> bool:
         error_message = str(exc)
         logger.warning("[%s] %s: auth required - %s", source.platform, location.name, exc)
         async with AsyncSessionLocal() as session:
-            db_source = await session.get(ReviewSource, source_id)
-            if db_source:
-                db_source.session_status = "reauth_required"
-                db_source.last_failed_sync_at = datetime.utcnow()
-                db_source.last_error_message = error_message
-            await session.commit()
+            await _mark_session_failure(session, source, auth_session, error_message)
         return False
     except ProviderFetchError as exc:
         error_message = str(exc)
         logger.error("[%s] %s: fetch failed - %s", source.platform, location.name, exc)
         async with AsyncSessionLocal() as session:
-            db_source = await session.get(ReviewSource, source_id)
-            if db_source:
-                db_source.session_status = "failed"
-                db_source.last_failed_sync_at = datetime.utcnow()
-                db_source.last_error_message = error_message
-            await session.commit()
+            await _mark_source_failure(session, source, auth_session, error_message, failed_status="failed")
         return False
     except Exception as exc:
         error_message = str(exc)
         logger.error("[%s] %s: unexpected fetch failure - %s", source.platform, location.name, exc)
         async with AsyncSessionLocal() as session:
-            db_source = await session.get(ReviewSource, source_id)
-            if db_source:
-                db_source.session_status = "failed"
-                db_source.last_failed_sync_at = datetime.utcnow()
-                db_source.last_error_message = error_message
-            await session.commit()
+            await _mark_source_failure(session, source, auth_session, error_message, failed_status="failed")
         return False
     finally:
         duration_ms = int((time.time() - start) * 1000)
@@ -154,6 +141,52 @@ async def _latest_auth_session(session, source_id: int) -> AuthSession | None:
             .limit(1)
         )
     ).scalar_one_or_none()
+
+
+async def _mark_session_failure(session, source: ReviewSource, auth_session: AuthSession | None, error_message: str) -> None:
+    await _mark_source_failure(session, source, auth_session, error_message, failed_status="reauth_required")
+
+
+async def _mark_source_failure(
+    session,
+    source: ReviewSource,
+    auth_session: AuthSession | None,
+    error_message: str,
+    *,
+    failed_status: str,
+) -> None:
+    target_sources = [await session.get(ReviewSource, source.id)]
+    if auth_session and auth_session.share_scope == "platform":
+        target_sources = (
+            await session.execute(
+                select(ReviewSource)
+                .where(
+                    ReviewSource.platform == source.platform,
+                    ReviewSource.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
+    elif auth_session and auth_session.share_scope == "account":
+        location = await session.get(Location, source.location_id)
+        account_id = location.google_account_id if location and source.platform == "google" else None
+        if account_id:
+            target_sources = (
+                await session.execute(
+                    select(ReviewSource)
+                    .join(Location, Location.id == ReviewSource.location_id)
+                    .where(
+                        ReviewSource.platform == source.platform,
+                        ReviewSource.is_active.is_(True),
+                        Location.google_account_id == account_id,
+                    )
+                )
+            ).scalars().all()
+
+    for target_source in filter(None, target_sources):
+        target_source.session_status = failed_status
+        target_source.last_failed_sync_at = datetime.utcnow()
+        target_source.last_error_message = error_message
+    await session.commit()
 
 
 async def _upsert_reviews(session, source: ReviewSource, reviews) -> int:

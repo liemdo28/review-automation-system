@@ -70,12 +70,13 @@ def _proxy_server_for(source_url: str) -> str:
     return ""
 
 
-def register_session(api_base_url: str, source_id: int, output_path: Path, share_scope: str) -> bool:
+def register_session(api_base_url: str, source_id: int, output_path: Path, share_scope: str, platform: str) -> bool:
     return _register_session(
         api_base_url=api_base_url,
         source_id=source_id,
         output_path=output_path,
         share_scope=share_scope,
+        platform=platform,
         source_url_override=None,
     )
 
@@ -85,12 +86,16 @@ def _register_session(
     source_id: int,
     output_path: Path,
     share_scope: str,
+    platform: str,
     source_url_override: str | None,
 ) -> bool:
+    shared_key = args_shared_key(share_scope=share_scope, platform=platform)
     payload = json.dumps(
         {
             "session_reference": str(output_path),
             "status": "active",
+            "share_scope": share_scope,
+            "shared_key": shared_key,
             "source_url_override": source_url_override,
         }
     ).encode("utf-8")
@@ -104,6 +109,9 @@ def _register_session(
         with request.urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read().decode("utf-8"))
             print(f"Session registered with START: HTTP {resp.status}")
+            print(f"Scope saved: {body.get('share_scope', share_scope)}")
+            if body.get("shared_key"):
+                print(f"Shared key: {body['shared_key']}")
             if body.get("source_url_updated") and body.get("source_url"):
                 print(f"Saved exact review URL for this source: {body['source_url']}")
     except error.URLError as exc:
@@ -112,6 +120,12 @@ def _register_session(
         print(str(output_path))
         return False
     return True
+
+
+def args_shared_key(*, share_scope: str, platform: str | None = None) -> str | None:
+    if share_scope == "platform" and platform:
+        return f"platform:{platform}"
+    return None
 
 
 def trigger_sync(api_base_url: str, source_id: int, platform: str, share_scope: str) -> None:
@@ -163,6 +177,7 @@ def main() -> int:
         args.source_id,
         output_path,
         args.share_scope,
+        args.platform,
         current_url,
     )
     if registered:

@@ -56,7 +56,11 @@
         </div>
 
         <div class="store-source-list">
-            {% for source in item.sources %}
+            {% for source_item in item.sources %}
+            {% set source = source_item.source if source_item.source is defined else source_item %}
+            {% set effective_session = source_item.effective_session if source_item.effective_session is defined else none %}
+            {% set using_shared_session = source_item.using_shared_session if source_item.using_shared_session is defined else false %}
+            {% set effective_source_url = source_item.effective_source_url if source_item.effective_source_url is defined else source.source_url %}
             <article class="store-source-row">
                 <div class="store-source-main">
                     <div class="store-source-top">
@@ -66,15 +70,25 @@
                         </div>
                         <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
                     </div>
-                    <p class="store-source-url">{{ source.source_url }}</p>
+                    <p class="store-source-url">{{ effective_source_url or source.source_url }}</p>
                     <div class="store-source-meta">
                         <div>
                             <span class="metric-label">Last successful sync</span>
                             <strong>{% if source.last_successful_sync_at %}{{ source.last_successful_sync_at.strftime('%m/%d %H:%M') }}{% else %}Not synced yet{% endif %}</strong>
                         </div>
                         <div>
-                            <span class="metric-label">Auth mode</span>
-                            <strong>{{ source.auth_mode }}</strong>
+                            <span class="metric-label">Session</span>
+                            <strong>
+                                {% if effective_session %}
+                                {{ 'Shared ' ~ effective_session.share_scope if using_shared_session else 'Source session' }}
+                                {% else %}
+                                No session
+                                {% endif %}
+                            </strong>
+                        </div>
+                        <div>
+                            <span class="metric-label">Using shared session</span>
+                            <strong>{{ "Yes" if using_shared_session else "No" }}</strong>
                         </div>
                     </div>
                 </div>
@@ -82,7 +96,7 @@
                     <button class="btn btn-login btn-platform-{{ source.platform }}" onclick='launchSessionBootstrap({{ source.id }}, {{ (source.source_label or source.platform|title)|tojson }}, {{ source.platform|tojson }})'>Login {{ source.platform|title }}</button>
                     <button class="btn btn-secondary btn-sm" onclick='launchSharedPlatformLogin({{ source.id }}, {{ source.platform|tojson }})'>Login All {{ source.platform|title }}</button>
                     <button class="btn btn-secondary btn-sm" onclick="triggerFetch('source_id={{ source.id }}')">Sync</button>
-                    <a href="{{ source.source_url }}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-sm">Open Page</a>
+                    <a href="{{ effective_source_url or source.source_url }}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-sm">Open Page</a>
                 </div>
             </article>
             {% else %}

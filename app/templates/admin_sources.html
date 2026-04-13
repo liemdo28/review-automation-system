@@ -30,6 +30,10 @@
                     <input type="text" name="source_url" value="{{ item.source.source_url or '' }}">
                 </label>
                 <label>
+                    <span>Resolved URL</span>
+                    <input type="text" name="resolved_source_url" value="{{ item.source.resolved_source_url or '' }}" placeholder="Exact review page URL if known">
+                </label>
+                <label>
                     <span>Auth mode</span>
                     <select name="auth_mode">
                         {% for mode in ['manual_session', 'public_or_session', 'session_required'] %}
@@ -64,10 +68,28 @@
                     <p class="eyebrow">Authorized Sessions</p>
                     <h3>Attach or rotate session reference</h3>
                 </div>
+                <div class="history-list compact-history">
+                    <article class="history-card">
+                        <div class="history-head">
+                            <strong>Effective session</strong>
+                            <span class="text-muted">{{ 'Shared ' ~ item.effective_session.share_scope if item.effective_session and item.using_shared_session else 'Source session' if item.effective_session else 'No session' }}</span>
+                        </div>
+                        <p>{{ item.effective_session.session_reference if item.effective_session else 'No active session resolved for this source.' }}</p>
+                        <p class="text-muted">Effective URL: {{ item.effective_source_url or item.source.source_url }}</p>
+                    </article>
+                </div>
                 <form method="post" action="/admin/sources/{{ item.source.id }}/sessions" class="admin-form">
                     <label class="admin-form-wide">
                         <span>Session reference</span>
                         <input type="text" name="session_reference" placeholder="Path or secure session reference">
+                    </label>
+                    <label>
+                        <span>Scope</span>
+                        <select name="share_scope">
+                            {% for scope in ['source', 'platform', 'account'] %}
+                            <option value="{{ scope }}">{{ scope }}</option>
+                            {% endfor %}
+                        </select>
                     </label>
                     <label>
                         <span>Status</span>
@@ -81,7 +103,15 @@
                         <span>Expires at (optional)</span>
                         <input type="datetime-local" name="expires_at">
                     </label>
-                    <p class="section-copy">Use source login for one listing, or platform-wide login when the same staff account should power every active source on that platform.</p>
+                    <label class="admin-form-wide">
+                        <span>Shared key (optional)</span>
+                        <input type="text" name="shared_key" placeholder="Use for future account-level grouping">
+                    </label>
+                    <label class="admin-form-wide">
+                        <span>Source URL override (optional)</span>
+                        <input type="text" name="source_url_override" placeholder="Exact Google business review URL if captured">
+                    </label>
+                    <p class="section-copy">Use source login for one listing, or platform-wide login when the same staff account should power every active source on that platform. Shared platform sessions are reused automatically during sync; operators do not need to log in again per store.</p>
                     <div class="section-actions">
                         <button type="button" class="btn btn-login btn-platform-{{ item.source.platform }}" onclick='launchSessionBootstrap({{ item.source.id }}, {{ (item.source.source_label or item.source.platform|title)|tojson }}, {{ item.source.platform|tojson }})'>Login {{ item.source.platform|title }}</button>
                         <button type="button" class="btn btn-secondary" onclick='launchSharedPlatformLogin({{ item.source.id }}, {{ item.source.platform|tojson }})'>Login All {{ item.source.platform|title }}</button>
@@ -97,12 +127,28 @@
                             <span class="text-muted">{{ session.updated_at.strftime('%m/%d %H:%M') if session.updated_at else '-' }}</span>
                         </div>
                         <p>{{ session.session_reference }}</p>
+                        <p class="text-muted">Scope: {{ session.share_scope }}{% if session.shared_key %} · {{ session.shared_key }}{% endif %}</p>
                         <p class="text-muted">Expires: {{ session.expires_at.strftime('%m/%d %H:%M') if session.expires_at else 'Not set' }}</p>
                     </article>
                     {% else %}
                     <p class="empty-state">No stored sessions yet.</p>
                     {% endfor %}
                 </div>
+
+                {% if item.platform_sessions %}
+                <div class="history-list compact-history">
+                    <article class="history-card">
+                        <div class="history-head">
+                            <strong>Shared {{ item.source.platform|title }} sessions</strong>
+                            <span class="text-muted">{{ item.platform_sessions|length }}</span>
+                        </div>
+                        {% for session in item.platform_sessions %}
+                        <p>{{ session.session_reference }}</p>
+                        <p class="text-muted">{{ session.share_scope }}{% if session.shared_key %} · {{ session.shared_key }}{% endif %}</p>
+                        {% endfor %}
+                    </article>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>

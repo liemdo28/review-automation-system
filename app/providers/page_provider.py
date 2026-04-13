@@ -18,8 +18,12 @@ class PageReviewProvider(ReviewProvider):
     default_selectors: dict[str, Any] = {}
     default_auth_required_selectors: list[str] = []
 
+    def _effective_source_url(self) -> str | None:
+        return getattr(self.source, "effective_source_url", None) or getattr(self.source, "resolved_source_url", None) or self.source.source_url
+
     async def validate_session(self) -> tuple[bool, str]:
-        if not self.source.source_url:
+        source_url = self._effective_source_url()
+        if not source_url:
             raise ProviderConfigError("Source URL is missing")
 
         auth_mode = (self.source.auth_mode or "").lower()
@@ -42,7 +46,7 @@ class PageReviewProvider(ReviewProvider):
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
             try:
-                response = await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
+                response = await page.goto(source_url, wait_until="domcontentloaded", timeout=45000)
                 await asyncio.sleep(1.5)
                 if await self._looks_blocked(page, response):
                     return False, "reauth_required"
@@ -53,7 +57,8 @@ class PageReviewProvider(ReviewProvider):
                 await browser.close()
 
     async def fetch_reviews(self) -> list[ProviderReview]:
-        if not self.source.source_url:
+        source_url = self._effective_source_url()
+        if not source_url:
             raise ProviderConfigError("Source URL is missing")
 
         from playwright.async_api import async_playwright
@@ -72,7 +77,7 @@ class PageReviewProvider(ReviewProvider):
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
             try:
-                response = await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
+                response = await page.goto(source_url, wait_until="domcontentloaded", timeout=45000)
                 await asyncio.sleep(2)
                 if await self._looks_blocked(page, response):
                     raise ProviderAuthRequiredError(
@@ -160,7 +165,7 @@ class PageReviewProvider(ReviewProvider):
         return ProviderReview(
             external_review_id=review_id,
             platform=self.platform,
-            source_url=self.source.source_url,
+            source_url=self._effective_source_url() or self.source.source_url,
             reviewer_name=reviewer_name or "Anonymous",
             rating=self.parse_rating(rating_text),
             review_text=review_text,
