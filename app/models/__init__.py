@@ -4,5 +4,18 @@ from app.models.reply import Reply
 from app.models.job import Job
 from app.models.fetch_log import FetchLog
 from app.models.email_alert import EmailAlert
+from app.models.review_source import ReviewSource
+from app.models.auth_session import AuthSession
+from app.models.reply_suggestion import ReplySuggestion
 
-__all__ = ["Location", "Review", "Reply", "Job", "FetchLog", "EmailAlert"]
+__all__ = [
+    "AuthSession",
+    "EmailAlert",
+    "FetchLog",
+    "Job",
+    "Location",
+    "Reply",
+    "ReplySuggestion",
+    "Review",
+    "ReviewSource",
+]

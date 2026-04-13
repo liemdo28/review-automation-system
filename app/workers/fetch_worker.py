@@ -1,213 +1,273 @@
-"""Scheduled worker: fetch reviews from Google + Yelp every 10 minutes."""
+"""Scheduled worker: fetch reviews through provider-based sources."""
+
+from __future__ import annotations
+
 import logging
 import time
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import AsyncSessionLocal
-from app.models import Location, Review, FetchLog, Job
-from app.services.google_auth import get_access_token
-from app.services.google_reviews import list_reviews
-from app.services.ai_reply import normalize_rating
-from app.config import settings
+from app.models import AuthSession, FetchLog, Job, Location, Reply, Review, ReviewSource
+from app.providers import ProviderAuthRequiredError, ProviderFetchError, get_provider
 
 logger = logging.getLogger("review_system.fetch_worker")
 
-STAR_MAP = {"ONE": 1, "TWO": 2, "THREE": 3, "FOUR": 4, "FIVE": 5}
 
-
-async def fetch_all_reviews():
-    """Main fetch cycle: iterate all active locations, fetch Google + Yelp reviews."""
+async def fetch_all_reviews(
+    *,
+    location_id: int | None = None,
+    platform: str | None = None,
+    source_id: int | None = None,
+) -> dict[str, int]:
+    """Iterate active sources and fetch reviews using provider implementations."""
     logger.info("=== Fetch cycle started ===")
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Location).where(Location.is_active == True)  # noqa: E712
-        )
-        locations = result.scalars().all()
 
-    for loc in locations:
-        if loc.fetch_google and loc.google_location_id:
-            await _fetch_google(loc)
-        if loc.fetch_yelp and loc.yelp_url:
-            await _fetch_yelp(loc)
+    async with AsyncSessionLocal() as session:
+        query = select(ReviewSource).where(ReviewSource.is_active.is_(True))
+        if location_id:
+            query = query.where(ReviewSource.location_id == location_id)
+        if platform:
+            query = query.where(ReviewSource.platform == platform)
+        if source_id:
+            query = query.where(ReviewSource.id == source_id)
+
+        sources = (await session.execute(query.order_by(ReviewSource.location_id, ReviewSource.platform))).scalars().all()
+
+    processed = 0
+    failed = 0
+    for source in sources:
+        success = await _fetch_source(source.id)
+        processed += 1
+        if not success:
+            failed += 1
 
     logger.info("=== Fetch cycle complete ===")
+    return {"sources_processed": processed, "sources_failed": failed}
 
 
-async def _fetch_google(loc: Location):
+async def _fetch_source(source_id: int) -> bool:
     start = time.time()
-    new_count = 0
-    error_msg = None
-
-    try:
-        token = await get_access_token(
-            settings.google_client_id,
-            settings.google_client_secret,
-            settings.google_refresh_token,
-        )
-        account_id = loc.google_account_id or settings.google_account_id
-        reviews = await list_reviews(token, account_id, loc.google_location_id)
-        logger.info(f"[Google] {loc.name}: fetched {len(reviews)} reviews")
-
-        async with AsyncSessionLocal() as session:
-            for r in reviews:
-                review_id = r.get("reviewId", r.get("name", "").split("/")[-1])
-                if not review_id:
-                    continue
-
-                raw_rating = r.get("starRating", "UNKNOWN")
-                rating = STAR_MAP.get(raw_rating, 0)
-                reviewer_name = r.get("reviewer", {}).get("displayName", "Anonymous")
-                comment = (r.get("comment") or "").strip()
-                has_reply = r.get("reviewReply") is not None
-                review_date_str = r.get("createTime")
-                review_date = None
-                if review_date_str:
-                    try:
-                        review_date = datetime.fromisoformat(review_date_str.replace("Z", "+00:00"))
-                    except (ValueError, TypeError):
-                        pass
-
-                stmt = pg_insert(Review).values(
-                    platform="google",
-                    platform_review_id=review_id,
-                    location_id=loc.id,
-                    reviewer_name=reviewer_name,
-                    rating=rating,
-                    review_text=comment,
-                    review_date=review_date,
-                    has_existing_reply=has_reply,
-                    raw_data=r,
-                ).on_conflict_do_nothing(constraint="uq_review_platform_id")
-
-                result = await session.execute(stmt)
-                if result.rowcount > 0:
-                    new_count += 1
-
-            await session.commit()
-
-            # Enqueue jobs for new reviews that don't already have replies
-            if new_count > 0:
-                await _enqueue_new_review_jobs(session, loc, "google")
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[Google] {loc.name}: fetch failed - {e}")
-
-    duration_ms = int((time.time() - start) * 1000)
-
-    async with AsyncSessionLocal() as session:
-        session.add(FetchLog(
-            location_id=loc.id,
-            platform="google",
-            reviews_found=len(reviews) if not error_msg else 0,
-            new_reviews=new_count,
-            errors=error_msg,
-            duration_ms=duration_ms,
-        ))
-        await session.commit()
-
-    if new_count > 0:
-        logger.info(f"[Google] {loc.name}: {new_count} new reviews saved")
-
-
-async def _fetch_yelp(loc: Location):
-    """Fetch Yelp reviews using Playwright. Imports lazily to avoid startup cost."""
-    start = time.time()
-    new_count = 0
-    error_msg = None
     reviews_found = 0
-
-    try:
-        from app.services.yelp_scraper import scrape_yelp_reviews
-        reviews, stats = await scrape_yelp_reviews(
-            url=loc.yelp_url,
-            max_reviews=20,
-            business_name=loc.name,
-            location_name=f"{loc.city}, {loc.state}" if loc.city else "",
-        )
-        reviews_found = len(reviews)
-        logger.info(f"[Yelp] {loc.name}: scraped {reviews_found} reviews")
-
-        async with AsyncSessionLocal() as session:
-            for r in reviews:
-                review_id = r.get("id", r.get("review_id", ""))
-                if not review_id:
-                    continue
-
-                rating = normalize_rating(r.get("rating", 0))
-
-                stmt = pg_insert(Review).values(
-                    platform="yelp",
-                    platform_review_id=str(review_id),
-                    location_id=loc.id,
-                    reviewer_name=r.get("reviewer_name", "Anonymous"),
-                    rating=rating,
-                    review_text=r.get("text", ""),
-                    review_date=None,
-                    has_existing_reply=False,
-                    raw_data=r,
-                ).on_conflict_do_nothing(constraint="uq_review_platform_id")
-
-                result = await session.execute(stmt)
-                if result.rowcount > 0:
-                    new_count += 1
-
-            await session.commit()
-
-            if new_count > 0:
-                await _enqueue_new_review_jobs(session, loc, "yelp")
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"[Yelp] {loc.name}: fetch failed - {e}")
-
-    duration_ms = int((time.time() - start) * 1000)
+    new_reviews = 0
+    error_message = None
 
     async with AsyncSessionLocal() as session:
-        session.add(FetchLog(
-            location_id=loc.id,
-            platform="yelp",
-            reviews_found=reviews_found,
-            new_reviews=new_count,
-            errors=error_msg,
-            duration_ms=duration_ms,
-        ))
-        await session.commit()
+        source = await session.get(ReviewSource, source_id)
+        location = await session.get(Location, source.location_id) if source else None
+        auth_session = await _latest_auth_session(session, source.id) if source else None
+        if not source or not location:
+            return False
 
-    if new_count > 0:
-        logger.info(f"[Yelp] {loc.name}: {new_count} new reviews saved")
+    try:
+        provider = get_provider(source, auth_session=auth_session)
+        session_ok, session_status = await provider.validate_session()
+
+        async with AsyncSessionLocal() as session:
+            db_source = await session.get(ReviewSource, source_id)
+            if db_source:
+                db_source.session_status = session_status
+                if session_ok:
+                    db_source.last_auth_at = datetime.utcnow()
+                else:
+                    db_source.last_failed_sync_at = datetime.utcnow()
+            await session.commit()
+
+        if not session_ok:
+            raise ProviderAuthRequiredError(
+                f"Session validation failed for {source.platform} source",
+                details={"source_id": source.id},
+            )
+
+        reviews = await provider.fetch_reviews()
+        reviews_found = len(reviews)
+        logger.info("[%s] %s: fetched %s reviews", source.platform, location.name, reviews_found)
+
+        async with AsyncSessionLocal() as session:
+            new_reviews = await _upsert_reviews(session, source, reviews)
+            await _enqueue_new_review_jobs(session, source, reviews)
+            db_source = await session.get(ReviewSource, source_id)
+            if db_source:
+                db_source.session_status = "active"
+                db_source.last_successful_sync_at = datetime.utcnow()
+                db_source.last_error_message = None
+            await session.commit()
+        return True
+
+    except ProviderAuthRequiredError as exc:
+        error_message = str(exc)
+        logger.warning("[%s] %s: auth required - %s", source.platform, location.name, exc)
+        async with AsyncSessionLocal() as session:
+            db_source = await session.get(ReviewSource, source_id)
+            if db_source:
+                db_source.session_status = "reauth_required"
+                db_source.last_failed_sync_at = datetime.utcnow()
+                db_source.last_error_message = error_message
+            await session.commit()
+        return False
+    except ProviderFetchError as exc:
+        error_message = str(exc)
+        logger.error("[%s] %s: fetch failed - %s", source.platform, location.name, exc)
+        async with AsyncSessionLocal() as session:
+            db_source = await session.get(ReviewSource, source_id)
+            if db_source:
+                db_source.session_status = "failed"
+                db_source.last_failed_sync_at = datetime.utcnow()
+                db_source.last_error_message = error_message
+            await session.commit()
+        return False
+    except Exception as exc:
+        error_message = str(exc)
+        logger.error("[%s] %s: unexpected fetch failure - %s", source.platform, location.name, exc)
+        async with AsyncSessionLocal() as session:
+            db_source = await session.get(ReviewSource, source_id)
+            if db_source:
+                db_source.session_status = "failed"
+                db_source.last_failed_sync_at = datetime.utcnow()
+                db_source.last_error_message = error_message
+            await session.commit()
+        return False
+    finally:
+        duration_ms = int((time.time() - start) * 1000)
+        async with AsyncSessionLocal() as session:
+            session.add(
+                FetchLog(
+                    location_id=source.location_id,
+                    platform=source.platform,
+                    reviews_found=reviews_found,
+                    new_reviews=new_reviews,
+                    errors=error_message,
+                    duration_ms=duration_ms,
+                )
+            )
+            await session.commit()
 
 
-async def _enqueue_new_review_jobs(session, loc: Location, platform: str):
-    """Create generate_reply jobs for new reviews without existing replies."""
-    from sqlalchemy import and_
-    from app.models import Reply
+async def _latest_auth_session(session, source_id: int) -> AuthSession | None:
+    return (
+        await session.execute(
+            select(AuthSession)
+            .where(AuthSession.source_id == source_id)
+            .order_by(AuthSession.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
-    result = await session.execute(
-        select(Review).where(
+
+async def _upsert_reviews(session, source: ReviewSource, reviews) -> int:
+    if not reviews:
+        return 0
+
+    external_ids = [review.external_review_id for review in reviews]
+    existing_ids = set(
+        (
+            await session.execute(
+                select(Review.external_review_id).where(
+                    and_(
+                        Review.platform == source.platform,
+                        Review.location_id == source.location_id,
+                        Review.external_review_id.in_(external_ids),
+                    )
+                )
+            )
+        ).scalars()
+    )
+
+    now = datetime.utcnow()
+    for provider_review in reviews:
+        payload = provider_review.raw_payload or {}
+        stmt = pg_insert(Review).values(
+            platform=source.platform,
+            platform_review_id=provider_review.external_review_id,
+            external_review_id=provider_review.external_review_id,
+            location_id=source.location_id,
+            source_id=source.id,
+            source_url=provider_review.source_url or source.source_url,
+            reviewer_name=provider_review.reviewer_name,
+            rating=provider_review.rating,
+            review_text=provider_review.review_text,
+            review_date=provider_review.review_date,
+            has_existing_reply=provider_review.has_owner_reply,
+            detected_owner_reply_text=provider_review.detected_owner_reply_text,
+            detected_owner_reply_at=provider_review.detected_owner_reply_at,
+            has_owner_reply=provider_review.has_owner_reply,
+            raw_data=payload,
+            raw_payload=payload,
+            collected_at=now,
+            first_seen_at=now,
+            last_seen_at=now,
+            fetched_at=now,
+        ).on_conflict_do_update(
+            constraint="uq_review_platform_external_id",
+            set_={
+                "source_id": source.id,
+                "source_url": provider_review.source_url or source.source_url,
+                "reviewer_name": provider_review.reviewer_name,
+                "rating": provider_review.rating,
+                "review_text": provider_review.review_text,
+                "review_date": provider_review.review_date,
+                "has_existing_reply": provider_review.has_owner_reply,
+                "detected_owner_reply_text": provider_review.detected_owner_reply_text,
+                "detected_owner_reply_at": provider_review.detected_owner_reply_at,
+                "has_owner_reply": provider_review.has_owner_reply,
+                "raw_data": payload,
+                "raw_payload": payload,
+                "collected_at": now,
+                "last_seen_at": now,
+                "fetched_at": now,
+            },
+        )
+        await session.execute(stmt)
+
+    return len([review for review in reviews if review.external_review_id not in existing_ids])
+
+
+async def _enqueue_new_review_jobs(session, source: ReviewSource, reviews) -> None:
+    if not reviews:
+        return
+
+    ids_to_queue = [review.external_review_id for review in reviews if not review.has_owner_reply]
+    if not ids_to_queue:
+        return
+
+    query = (
+        select(Review)
+        .where(
             and_(
-                Review.location_id == loc.id,
-                Review.platform == platform,
-                Review.has_existing_reply == False,  # noqa: E712
-                ~Review.id.in_(select(Reply.review_id)),
-                ~Review.id.in_(select(Job.review_id).where(Job.job_type == "generate_reply")),
+                Review.platform == source.platform,
+                Review.location_id == source.location_id,
+                Review.external_review_id.in_(ids_to_queue),
             )
         )
+        .order_by(Review.review_date.desc().nullslast(), Review.id.desc())
     )
-    new_reviews = result.scalars().all()
-
-    for review in new_reviews:
-        session.add(Job(
-            job_type="generate_reply",
-            review_id=review.id,
-            location_id=loc.id,
-            status="queued",
-        ))
-
-    await session.commit()
-    if new_reviews:
-        logger.info(f"Enqueued {len(new_reviews)} generate_reply jobs for {loc.name} ({platform})")
+    db_reviews = (await session.execute(query)).scalars().all()
+    for review in db_reviews:
+        existing_reply = (
+            await session.execute(select(Reply).where(Reply.review_id == review.id))
+        ).scalar_one_or_none()
+        queued_job = (
+            await session.execute(
+                select(Job).where(
+                    and_(
+                        Job.review_id == review.id,
+                        Job.job_type == "generate_reply",
+                        Job.status.in_(["queued", "processing"]),
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if review.has_owner_reply or existing_reply or queued_job:
+            continue
+        session.add(
+            Job(
+                job_type="generate_reply",
+                review_id=review.id,
+                location_id=review.location_id,
+                source_id=source.id,
+                status="queued",
+                payload={"tone_mode": "gentle_professional"},
+            )
+        )

@@ -1,74 +1,136 @@
 {% extends "base.html" %}
-{% block title %}Review #{{ review.id }} - Review System{% endblock %}
+{% block title %}Review #{{ review.id }} - Review Ops{% endblock %}
 {% block content %}
-<a href="/reviews" class="back-link">&larr; Back to Reviews</a>
+<a href="/reviews" class="back-link">&larr; Back to queue</a>
 
-<div class="review-detail">
-    <div class="review-header">
-        <h1>Review #{{ review.id }}</h1>
-        <span class="badge badge-{{ review.platform }}">{{ review.platform }}</span>
+<section class="page-header compact">
+    <div>
+        <p class="eyebrow">Review Detail</p>
+        <h1>{{ location.name if location else 'Review' }}</h1>
+        <p class="text-muted">Status: <span class="status status-{{ review_status }}">{{ review_status.replace('_', ' ') }}</span></p>
     </div>
+    <div class="hero-actions">
+        <button class="btn btn-secondary" onclick="regenerateReply({{ review.id }})">Regenerate Suggestion</button>
+        {% if reply %}
+        <button class="btn" onclick="approveReply({{ review.id }})">Approve</button>
+        {% endif %}
+        <button class="btn btn-secondary" onclick="markSingleHandled({{ review.id }})">Mark Handled</button>
+    </div>
+</section>
 
-    <div class="detail-grid">
-        <div class="detail-card">
-            <h3>Review</h3>
-            <div class="review-meta">
-                <strong>{{ review.reviewer_name or 'Anonymous' }}</strong>
-                <span class="rating-{{ 'positive' if review.rating >= 4 else 'negative' }}">
-                    {{ '\u2b50' * review.rating }} ({{ review.rating }}/5)
-                </span>
-                {% if review.review_date %}
-                <span class="text-muted">{{ review.review_date.strftime('%B %d, %Y') }}</span>
-                {% endif %}
+<div class="detail-grid">
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Guest Review</p>
+                <h2>{{ review.reviewer_name or 'Anonymous' }}</h2>
             </div>
-            <p class="review-body">{{ review.review_text or '(No text)' }}</p>
-            {% if location %}
-            <p class="text-muted">{{ location.name }} - {{ location.address }}</p>
-            {% endif %}
+            <span class="badge badge-{{ review.platform }}">{{ review.platform }}</span>
         </div>
+        <p class="review-meta-line">{{ review.rating }}/5 · {{ review.review_date.strftime('%B %d, %Y') if review.review_date else 'No date' }}</p>
+        <p class="review-body">{{ review.review_text or 'No written comment was provided.' }}</p>
+        {% if review.has_owner_reply %}
+        <div class="inline-note success">
+            <strong>Owner reply detected on source page.</strong>
+            <p>{{ review.detected_owner_reply_text or 'A merchant response is visible on the source page.' }}</p>
+        </div>
+        {% endif %}
+        {% if source %}
+        <div class="meta-list">
+            <div><span>Source label</span><strong>{{ source.source_label or source.platform|title }}</strong></div>
+            <div><span>Auth mode</span><strong>{{ source.auth_mode }}</strong></div>
+            <div><span>Session status</span><strong>{{ source.session_status }}</strong></div>
+            <div><span>Source URL</span><a href="{{ source.source_url }}" target="_blank" rel="noreferrer">Open source page</a></div>
+        </div>
+        {% endif %}
+    </section>
 
-        <div class="detail-card">
-            <h3>AI Reply</h3>
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Suggested Reply</p>
+                <h2>{{ reply.tone_mode.replace('_', ' ') if reply else 'No active reply' }}</h2>
+            </div>
             {% if reply %}
-            <div class="reply-status">
-                Status: <span class="status-{{ reply.status }}">{{ reply.status }}</span>
-                {% if reply.is_dry_run %}<span class="badge badge-dry-run">DRY RUN</span>{% endif %}
-            </div>
-            <textarea class="reply-editor" id="replyText" rows="6">{{ reply.ai_reply_text }}</textarea>
-            <div class="reply-actions">
-                {% if reply.status in ['pending', 'email_sent', 'suggested'] %}
-                <button class="btn btn-green" onclick="approveReply({{ review.id }})">Approve & Post</button>
-                {% endif %}
-                <button class="btn" onclick="copyReply()">Copy Reply</button>
-            </div>
-            {% if reply.posted_at %}
-            <p class="text-muted">Posted: {{ reply.posted_at.strftime('%m/%d/%Y %H:%M') }}</p>
-            {% endif %}
-            {% else %}
-            <p class="text-muted">No AI reply generated yet.</p>
+            <span class="status status-{{ reply.status }}">{{ reply.status }}</span>
             {% endif %}
         </div>
-    </div>
-
-    <div class="section">
-        <h3>Job History</h3>
-        <table class="data-table">
-            <thead>
-                <tr><th>Type</th><th>Status</th><th>Retries</th><th>Queued</th><th>Completed</th><th>Error</th></tr>
-            </thead>
-            <tbody>
-                {% for job in jobs %}
-                <tr>
-                    <td>{{ job.job_type }}</td>
-                    <td><span class="status-{{ job.status }}">{{ job.status }}</span></td>
-                    <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
-                    <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
-                    <td>{{ job.completed_at.strftime('%m/%d %H:%M') if job.completed_at else '-' }}</td>
-                    <td class="error-text">{{ job.error_message or '-' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+        {% if reply %}
+        <textarea class="reply-editor" id="replyText" rows="8">{{ reply.ai_reply_text }}</textarea>
+        <div class="meta-list">
+            <div><span>Reason summary</span><strong>{{ reply.reason_summary or '-' }}</strong></div>
+            <div><span>Confidence note</span><strong>{{ reply.confidence_note or '-' }}</strong></div>
+            <div><span>Issue tags</span><strong>{{ (reply.issue_tags or [])|join(', ') or '-' }}</strong></div>
+            <div><span>Risk flags</span><strong>{{ (reply.risk_flags or [])|join(', ') or '-' }}</strong></div>
+        </div>
+        <div class="reply-actions">
+            <button class="btn" onclick="approveReply({{ review.id }})">Approve</button>
+            <button class="btn btn-secondary" onclick="copyReply()">Copy Reply</button>
+        </div>
+        {% else %}
+        <p class="text-muted">No suggestion exists for this review yet.</p>
+        {% endif %}
+    </section>
 </div>
+
+<section class="panel">
+    <div class="section-header">
+        <div>
+            <p class="eyebrow">Suggestion History</p>
+            <h2>Generated variants</h2>
+        </div>
+    </div>
+    <div class="history-list">
+        {% for suggestion in suggestions %}
+        <article class="history-card">
+            <div class="history-head">
+                <strong>{{ suggestion.tone_mode.replace('_', ' ') }}</strong>
+                <span class="text-muted">{{ suggestion.created_at.strftime('%m/%d %H:%M') if suggestion.created_at else '-' }}</span>
+            </div>
+            <p>{{ suggestion.suggestion_text }}</p>
+            <p class="text-muted">{{ suggestion.reason_summary or 'No summary' }}</p>
+        </article>
+        {% else %}
+        <p class="text-muted">No suggestion history available.</p>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-header">
+        <div>
+            <p class="eyebrow">Job History</p>
+            <h2>Collector and workflow events</h2>
+        </div>
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr><th>Type</th><th>Status</th><th>Retries</th><th>Queued</th><th>Completed</th><th>Error</th></tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr>
+                <td>{{ job.job_type }}</td>
+                <td><span class="status status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
+                <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
+                <td>{{ job.completed_at.strftime('%m/%d %H:%M') if job.completed_at else '-' }}</td>
+                <td class="error-text">{{ job.error_message or '-' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted">No jobs recorded.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+<section class="panel">
+    <div class="section-header">
+        <div>
+            <p class="eyebrow">Source Metadata</p>
+            <h2>Raw review payload</h2>
+        </div>
+    </div>
+    <pre class="code-block">{{ (review.raw_payload or review.raw_data or {}) | tojson(indent=2) }}</pre>
+</section>
 {% endblock %}

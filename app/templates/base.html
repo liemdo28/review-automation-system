@@ -1,21 +1,26 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Review System{% endblock %}</title>
+    <title>{% block title %}START{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <nav class="navbar">
-        <div class="nav-brand">Review Automation</div>
+        <div class="nav-brand">
+            <span class="nav-kicker">START</span>
+            <span class="nav-title">Restaurant Review Desk</span>
+        </div>
         <div class="nav-links">
-            <a href="/" class="nav-link">Dashboard</a>
-            <a href="/reviews" class="nav-link">Reviews</a>
-            <a href="/locations" class="nav-link">Locations</a>
+            <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+            <a href="/reviews" class="nav-link {% if request.url.path.startswith('/reviews') %}active{% endif %}">Needs Attention</a>
+            <a href="/locations" class="nav-link {% if request.url.path.startswith('/locations') %}active{% endif %}">Locations</a>
+            <a href="/admin/sources" class="nav-link {% if request.url.path.startswith('/admin') %}active{% endif %}">Admin</a>
         </div>
         <div class="nav-status">
-            <span class="status-dot"></span> System Active
+            <span class="status-dot"></span>
+            <span>Operator-assisted review workflow</span>
         </div>
     </nav>
     <main class="container">

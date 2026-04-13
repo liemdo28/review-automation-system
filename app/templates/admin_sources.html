@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Admin Sources - Review Ops{% endblock %}
+{% block content %}
+<section class="page-header compact">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Source and session management</h1>
+        <p class="text-muted">Update source settings, attach authorized session references, and monitor which sources need re-authentication.</p>
+    </div>
+</section>
+
+<div class="admin-grid">
+    {% for item in items %}
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">{{ item.location.name if item.location else 'Unknown location' }}</p>
+                <h2>{{ item.source.source_label or item.source.platform|title }}</h2>
+            </div>
+            <span class="status status-{{ item.source.session_status }}">{{ item.source.session_status.replace('_', ' ') }}</span>
+        </div>
+
+        <form method="post" action="/admin/sources/{{ item.source.id }}" class="admin-form">
+            <label>
+                <span>Source label</span>
+                <input type="text" name="source_label" value="{{ item.source.source_label or '' }}">
+            </label>
+            <label>
+                <span>Source URL</span>
+                <input type="text" name="source_url" value="{{ item.source.source_url or '' }}">
+            </label>
+            <label>
+                <span>Auth mode</span>
+                <select name="auth_mode">
+                    {% for mode in ['manual_session', 'public_or_session', 'session_required'] %}
+                    <option value="{{ mode }}" {% if item.source.auth_mode == mode %}selected{% endif %}>{{ mode }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Session status</span>
+                <select name="session_status">
+                    {% for status in ['unknown', 'active', 'reauth_required', 'failed', 'missing'] %}
+                    <option value="{{ status }}" {% if item.source.session_status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="admin-form-wide">
+                <span>Settings JSON</span>
+                <textarea name="settings_json" rows="8">{{ (item.source.settings or {}) | tojson(indent=2) }}</textarea>
+            </label>
+            <label class="checkbox-row">
+                <input type="checkbox" name="is_active" {% if item.source.is_active %}checked{% endif %}>
+                <span>Source is active</span>
+            </label>
+            <div class="reply-actions">
+                <button type="submit" class="btn">Save Source</button>
+                <button type="button" class="btn btn-secondary" onclick="triggerFetch('source_id={{ item.source.id }}')">Sync Source</button>
+            </div>
+        </form>
+
+        <div class="admin-subsection">
+            <div class="section-header">
+                <div>
+                    <p class="eyebrow">Authorized Sessions</p>
+                    <h3>Attach or rotate session reference</h3>
+                </div>
+            </div>
+            <form method="post" action="/admin/sources/{{ item.source.id }}/sessions" class="admin-form">
+                <label class="admin-form-wide">
+                    <span>Session reference</span>
+                    <input type="text" name="session_reference" placeholder="Path or secure session reference">
+                </label>
+                <label>
+                    <span>Status</span>
+                    <select name="session_status">
+                        {% for status in ['active', 'reauth_required', 'expired'] %}
+                        <option value="{{ status }}">{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Expires at (optional)</span>
+                    <input type="datetime-local" name="expires_at">
+                </label>
+                <p class="text-muted">Use <strong>Login {{ item.source.platform|title }}</strong> for the guided flow: START opens the correct browser window for this source, you sign in manually, then the session file is saved and attached automatically.</p>
+                <div class="reply-actions">
+                    <button type="button" class="btn btn-login btn-platform-{{ item.source.platform }}" onclick='launchSessionBootstrap({{ item.source.id }}, {{ (item.source.source_label or item.source.platform|title)|tojson }}, {{ item.source.platform|tojson }})'>Login {{ item.source.platform|title }}</button>
+                    <button type="submit" class="btn btn-secondary">Save Session</button>
+                </div>
+            </form>
+
+            <div class="history-list compact-history">
+                {% for session in item.sessions %}
+                <article class="history-card">
+                    <div class="history-head">
+                        <strong>{{ session.status }}</strong>
+                        <span class="text-muted">{{ session.updated_at.strftime('%m/%d %H:%M') if session.updated_at else '-' }}</span>
+                    </div>
+                    <p>{{ session.session_reference }}</p>
+                    <p class="text-muted">Expires: {{ session.expires_at.strftime('%m/%d %H:%M') if session.expires_at else 'Not set' }}</p>
+                </article>
+                {% else %}
+                <p class="text-muted">No stored sessions yet.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+    {% endfor %}
+</div>
+{% endblock %}

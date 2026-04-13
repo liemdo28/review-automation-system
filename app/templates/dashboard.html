@@ -1,82 +1,164 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - Review System{% endblock %}
+{% block title %}Dashboard - Review Ops{% endblock %}
 {% block content %}
-<h1>Dashboard</h1>
+<section class="hero">
+    <div>
+        <p class="eyebrow">Daily Operations</p>
+        <h1>Unreplied reviews, source health, and reply readiness in one place.</h1>
+        <p class="hero-copy">This dashboard prioritizes the reviews that still need attention, highlights source session problems, and keeps suggestion work visible for staff.</p>
+    </div>
+    <div class="hero-actions">
+        <button class="btn" onclick="triggerFetch()">Sync All Sources</button>
+        <a href="/reviews" class="btn btn-secondary">Open Review Queue</a>
+    </div>
+</section>
+
+{% if summary.auth_expired_jobs > 0 %}
+<section class="alert-banner">
+    <strong>Re-authentication needed.</strong>
+    <span>{{ summary.auth_expired_jobs }} source(s) need a refreshed authorized session before collection can continue normally.</span>
+    <a href="/locations" class="btn btn-secondary btn-sm">Open Sources</a>
+</section>
+{% endif %}
 
 <div class="stats-grid">
     <div class="stat-card">
-        <div class="stat-value">{{ total_reviews }}</div>
-        <div class="stat-label">Total Reviews</div>
+        <div class="stat-label">Total Unreplied Reviews</div>
+        <div class="stat-value">{{ summary.total_unreplied_reviews }}</div>
     </div>
-    <div class="stat-card stat-green">
-        <div class="stat-value">{{ total_posted }}</div>
-        <div class="stat-label">Replies Posted</div>
+    <div class="stat-card accent-google">
+        <div class="stat-label">Google Unreplied</div>
+        <div class="stat-value">{{ summary.google_unreplied_reviews }}</div>
     </div>
-    <div class="stat-card stat-yellow">
-        <div class="stat-value">{{ total_pending }}</div>
-        <div class="stat-label">Pending Review</div>
+    <div class="stat-card accent-yelp">
+        <div class="stat-label">Yelp Unreplied</div>
+        <div class="stat-value">{{ summary.yelp_unreplied_reviews }}</div>
     </div>
-    <div class="stat-card stat-blue">
-        <div class="stat-value">{{ total_suggested }}</div>
-        <div class="stat-label">Yelp Suggestions</div>
+    <div class="stat-card accent-alert">
+        <div class="stat-label">Negative Reviews Needing Attention</div>
+        <div class="stat-value">{{ summary.negative_reviews_needing_attention }}</div>
+    </div>
+    <div class="stat-card accent-neutral">
+        <div class="stat-label">Collected Today</div>
+        <div class="stat-value">{{ summary.reviews_collected_today }}</div>
+    </div>
+    <div class="stat-card accent-warning">
+        <div class="stat-label">Failed Jobs / Auth Expired</div>
+        <div class="stat-value">{{ summary.failed_jobs }} / {{ summary.auth_expired_jobs }}</div>
     </div>
 </div>
 
-<div class="section-row">
-    <div class="section">
-        <h2>Locations</h2>
-        <div class="location-grid">
-            {% for item in locations %}
-            <div class="location-card">
-                <h3>{{ item.loc.name }}</h3>
-                <p class="location-address">{{ item.loc.address }}</p>
-                <div class="location-stats">
-                    <span>{{ item.review_count }} reviews</span>
-                    {% if item.last_fetch %}
-                    <span class="text-muted">Last fetch: {{ item.last_fetch.strftime('%m/%d %H:%M') }}</span>
-                    {% else %}
-                    <span class="text-muted">Never fetched</span>
-                    {% endif %}
-                </div>
-                <div class="location-badges">
-                    {% if item.loc.fetch_google %}<span class="badge badge-google">Google</span>{% endif %}
-                    {% if item.loc.fetch_yelp %}<span class="badge badge-yelp">Yelp</span>{% endif %}
-                </div>
+<div class="dashboard-grid">
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Source Health</p>
+                <h2>Store and platform readiness</h2>
             </div>
+        </div>
+        <div class="source-stack">
+            {% for item in source_items %}
+            <article class="source-cluster">
+                <div class="source-cluster-head">
+                    <div>
+                        <h3>{{ item.location.name }}</h3>
+                        <p class="text-muted">{{ item.location.address }}</p>
+                    </div>
+                    <div class="cluster-metric">
+                        <span class="metric-label">Open queue</span>
+                        <strong>{{ item.outstanding }}</strong>
+                    </div>
+                </div>
+                <div class="source-chip-row">
+                    {% for source in item.sources %}
+                    <div class="source-chip">
+                        <div>
+                            <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
+                            <strong>{{ source.source_label or source.platform|title }}</strong>
+                        </div>
+                        <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
+                        <span class="text-muted">
+                            {% if source.last_successful_sync_at %}
+                            Last sync {{ source.last_successful_sync_at.strftime('%m/%d %H:%M') }}
+                            {% else %}
+                            No successful sync yet
+                            {% endif %}
+                        </span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </article>
             {% endfor %}
         </div>
-    </div>
+    </section>
+
+    <section class="panel">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Needs Attention</p>
+                <h2>Recent unreplied reviews</h2>
+            </div>
+            <a href="/reviews" class="btn btn-secondary btn-sm">View All</a>
+        </div>
+        <div class="attention-list">
+            {% for item in recent_review_items %}
+            <a href="/reviews/{{ item.review.id }}" class="attention-card">
+                <div class="attention-topline">
+                    <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
+                    <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+                </div>
+                <h3>{{ item.location.name if item.location else 'Unknown location' }}</h3>
+                <p class="attention-meta">{{ item.review.reviewer_name or 'Anonymous' }} · {{ item.review.rating }}/5 · {{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</p>
+                <p class="attention-body">{{ item.review.review_text or 'No written comment provided.' }}</p>
+                <p class="attention-note">
+                    {% if item.suggestion %}
+                    {{ item.suggestion.reason_summary }}
+                    {% elif item.reply %}
+                    {{ item.reply.reason_summary or 'Suggestion available' }}
+                    {% else %}
+                    Waiting for suggestion
+                    {% endif %}
+                </p>
+            </a>
+            {% else %}
+            <p class="text-muted">No unreplied reviews are currently waiting in the default queue.</p>
+            {% endfor %}
+        </div>
+    </section>
 </div>
 
-<div class="section">
+<section class="panel">
     <div class="section-header">
-        <h2>Recent Activity</h2>
-        <button class="btn btn-sm" onclick="triggerFetch()">Fetch Now</button>
+        <div>
+            <p class="eyebrow">Execution</p>
+            <h2>Recent jobs</h2>
+        </div>
     </div>
     <table class="data-table">
         <thead>
             <tr>
-                <th>Type</th>
+                <th>Job</th>
                 <th>Status</th>
-                <th>Review ID</th>
+                <th>Review</th>
+                <th>Source</th>
                 <th>Retries</th>
-                <th>Time</th>
+                <th>Queued</th>
             </tr>
         </thead>
         <tbody>
             {% for job in recent_jobs %}
             <tr>
-                <td><span class="badge badge-{{ job.job_type }}">{{ job.job_type }}</span></td>
-                <td><span class="status-{{ job.status }}">{{ job.status }}</span></td>
+                <td><span class="badge badge-job">{{ job.job_type }}</span></td>
+                <td><span class="status status-{{ job.status }}">{{ job.status }}</span></td>
                 <td>{{ job.review_id or '-' }}</td>
+                <td>{{ job.source_id or '-' }}</td>
                 <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
                 <td>{{ job.queued_at.strftime('%m/%d %H:%M') if job.queued_at else '-' }}</td>
             </tr>
+            {% else %}
+            <tr><td colspan="6" class="text-center text-muted">No jobs yet.</td></tr>
             {% endfor %}
-            {% if not recent_jobs %}
-            <tr><td colspan="5" class="text-center text-muted">No jobs yet. Click "Fetch Now" to start.</td></tr>
-            {% endif %}
         </tbody>
     </table>
-</div>
+</section>
 {% endblock %}

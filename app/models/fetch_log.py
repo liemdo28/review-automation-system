@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import String, Integer, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,4 +15,4 @@ class FetchLog(Base):
     new_reviews: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
-    fetched_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    fetched_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)

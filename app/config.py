@@ -11,15 +11,13 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Google OAuth
-    google_client_id: str = ""
-    google_client_secret: str = ""
-    google_refresh_token: str = ""
-    google_account_id: str = ""
-
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    default_reply_tone: str = "gentle_professional"
+
+    # Web collector sessions
+    session_storage_dir: str = ".sessions"
 
     # Email
     smtp_host: str = "smtp.gmail.com"
@@ -34,6 +32,7 @@ class Settings(BaseSettings):
     fetch_interval_minutes: int = 10
     process_interval_minutes: int = 1
     max_retries: int = 3
+    job_execution_mode: str = "inline"
     log_level: str = "INFO"
     secret_key: str = "change-this"
 

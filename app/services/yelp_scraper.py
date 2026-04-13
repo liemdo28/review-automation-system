@@ -3,7 +3,7 @@ import asyncio
 import logging
 import random
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 logger = logging.getLogger("review_system.yelp_scraper")
 
@@ -14,7 +14,7 @@ def parse_date(date_str: str) -> str | None:
         return None
 
     date_str = date_str.strip()
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     # Relative dates: "2 days ago", "1 week ago", etc.
     rel = re.match(r"(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", date_str, re.I)

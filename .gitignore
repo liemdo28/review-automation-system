@@ -6,6 +6,7 @@ build/
 .venv/
 venv/
 .env
+.run/
 *.db
 *.sqlite3
 *.log
