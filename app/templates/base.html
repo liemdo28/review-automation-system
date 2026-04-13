@@ -7,25 +7,38 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">
-            <span class="nav-kicker">START</span>
-            <span class="nav-title">Restaurant Review Desk</span>
-        </div>
-        <div class="nav-links">
-            <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
-            <a href="/reviews" class="nav-link {% if request.url.path.startswith('/reviews') %}active{% endif %}">Needs Attention</a>
-            <a href="/locations" class="nav-link {% if request.url.path.startswith('/locations') %}active{% endif %}">Locations</a>
-            <a href="/admin/sources" class="nav-link {% if request.url.path.startswith('/admin') %}active{% endif %}">Admin</a>
-        </div>
-        <div class="nav-status">
-            <span class="status-dot"></span>
-            <span>Operator-assisted review workflow</span>
-        </div>
-    </nav>
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+    <div class="page-shell">
+        <header class="topbar panel">
+            <div class="topbar-copy">
+                <div class="brand-lockup">
+                    <div class="brand-mark">S</div>
+                    <div class="brand-copy">
+                        <span class="eyebrow">START</span>
+                        <strong class="brand-title">Restaurant Review Desk</strong>
+                    </div>
+                </div>
+                <div>
+                    <h1>{% block shell_title %}Review operations, not spreadsheet triage.{% endblock %}</h1>
+                    <p class="topbar-subtitle">{% block shell_subtitle %}Monitor source health, review quality, and reply approval from one workspace built for daily restaurant ops.{% endblock %}</p>
+                </div>
+            </div>
+            <div class="topbar-actions">
+                <div class="topbar-statuses">
+                    <span class="topbar-status-chip">Operator-assisted workflow</span>
+                    <span class="topbar-status-chip is-neutral">Original-language capture</span>
+                </div>
+                <nav class="workspace-tabs" aria-label="Primary">
+                    <a href="/" class="workspace-tab {% if request.url.path == '/' %}is-active{% endif %}">Dashboard</a>
+                    <a href="/reviews" class="workspace-tab {% if request.url.path.startswith('/reviews') %}is-active{% endif %}">Needs Attention</a>
+                    <a href="/locations" class="workspace-tab {% if request.url.path.startswith('/locations') %}is-active{% endif %}">Locations</a>
+                    <a href="/admin/sources" class="workspace-tab {% if request.url.path.startswith('/admin') %}is-active{% endif %}">Admin</a>
+                </nav>
+            </div>
+        </header>
+        <main class="workspace-main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
     <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

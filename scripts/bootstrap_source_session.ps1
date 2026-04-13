@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [int]$SourceId,
+    [string]$ShareScope = "source",
     [Parameter(Mandatory = $true)]
     [string]$Platform,
     [Parameter(Mandatory = $true)]
@@ -31,6 +32,7 @@ Write-Host ""
 
 & $pythonExe "scripts\\bootstrap_source_session.py" `
     --source-id $SourceId `
+    --share-scope $ShareScope `
     --platform $Platform `
     --source-url $SourceUrl `
     --source-label $SourceLabel `

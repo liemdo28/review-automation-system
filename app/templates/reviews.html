@@ -1,171 +1,185 @@
 {% extends "base.html" %}
-{% block title %}Needs Attention - Review Ops{% endblock %}
+{% block title %}Needs Attention - START{% endblock %}
+{% block shell_title %}One queue for unreplied reviews, reply suggestions, and operator approval.{% endblock %}
+{% block shell_subtitle %}The queue keeps the original customer language, surfaces rating and source status fast, and gives staff a cleaner approval flow than a raw data table.{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div>
-        <p class="eyebrow">Review Queue</p>
-        <h1>Unreplied and in-progress reviews</h1>
-    </div>
-    <div class="hero-actions">
-        <button class="btn btn-secondary" onclick="triggerFetch()">Sync Queue</button>
-    </div>
-</section>
-
-<section class="panel bulk-toolbar">
-    <div>
-        <p class="eyebrow">Bulk Actions</p>
-        <h2>Operate on selected reviews</h2>
-    </div>
-    <div class="hero-actions">
-        <button type="button" class="btn btn-secondary" onclick="toggleAllReviews(true)">Select all on page</button>
-        <button type="button" class="btn btn-secondary" onclick="bulkRegenerate()">Regenerate replies</button>
-        <button type="button" class="btn btn-secondary" onclick="bulkExport()">Export CSV</button>
-        <button type="button" class="btn" onclick="bulkMarkHandled()">Mark handled</button>
-    </div>
-</section>
-
-<section class="panel filter-panel">
-    <form method="get" class="filter-form">
-        <label>
-            <span>Store</span>
-            <select name="location_id">
-                <option value="">All stores</option>
-                {% for loc in locations %}
-                <option value="{{ loc.id }}" {% if filters.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            <span>Platform</span>
-            <select name="platform">
-                <option value="">All</option>
-                <option value="google" {% if filters.platform == 'google' %}selected{% endif %}>Google</option>
-                <option value="yelp" {% if filters.platform == 'yelp' %}selected{% endif %}>Yelp</option>
-            </select>
-        </label>
-        <label>
-            <span>Date preset</span>
-            <select name="date_preset">
-                <option value="1d" {% if filters.date_preset == '1d' %}selected{% endif %}>1 day ago</option>
-                <option value="3d" {% if filters.date_preset == '3d' %}selected{% endif %}>3 days ago</option>
-                <option value="7d" {% if filters.date_preset == '7d' %}selected{% endif %}>7 days ago</option>
-                <option value="30d" {% if filters.date_preset == '30d' %}selected{% endif %}>30 days ago</option>
-                <option value="all" {% if filters.date_preset == 'all' %}selected{% endif %}>All available</option>
-            </select>
-        </label>
-        <label>
-            <span>Date from</span>
-            <input type="date" name="date_from" value="{{ filters.date_from }}">
-        </label>
-        <label>
-            <span>Date to</span>
-            <input type="date" name="date_to" value="{{ filters.date_to }}">
-        </label>
-        <label>
-            <span>Rating</span>
-            <select name="rating">
-                <option value="">All ratings</option>
-                {% for r in range(1, 6) %}
-                <option value="{{ r }}" {% if filters.rating == r %}selected{% endif %}>{{ r }} star</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            <span>Status</span>
-            <select name="status">
-                <option value="">Needs attention</option>
-                <option value="unreplied" {% if filters.status == 'unreplied' %}selected{% endif %}>Unreplied</option>
-                <option value="replied" {% if filters.status == 'replied' %}selected{% endif %}>Replied</option>
-                <option value="pending_review" {% if filters.status == 'pending_review' %}selected{% endif %}>Pending review</option>
-                <option value="approved" {% if filters.status == 'approved' %}selected{% endif %}>Approved</option>
-                <option value="posted" {% if filters.status == 'posted' %}selected{% endif %}>Posted</option>
-                <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>Failed</option>
-                <option value="handled" {% if filters.status == 'handled' %}selected{% endif %}>Handled</option>
-            </select>
-        </label>
-        <div class="filter-actions">
-            <button type="submit" class="btn">Apply Filters</button>
-            <a href="/reviews" class="btn btn-secondary">Reset</a>
+<section class="workspace-section">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Queue Controls</p>
+                <h2>Review filters and bulk actions</h2>
+                <p class="section-copy">Filter by store, platform, time window, rating, and workflow status before you regenerate, export, or mark reviews as handled.</p>
+            </div>
+            <div class="section-actions">
+                <button class="btn btn-secondary" onclick="triggerFetch()">Sync Queue</button>
+            </div>
         </div>
-    </form>
+
+        <div class="action-strip">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAllReviews(true)">Select all on page</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkRegenerate()">Regenerate replies</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkExport()">Export CSV</button>
+            <button type="button" class="btn btn-sm" onclick="bulkMarkHandled()">Mark handled</button>
+        </div>
+
+        <form method="get" class="filter-grid">
+            <label>
+                <span>Store</span>
+                <select name="location_id">
+                    <option value="">All stores</option>
+                    {% for loc in locations %}
+                    <option value="{{ loc.id }}" {% if filters.location_id == loc.id %}selected{% endif %}>{{ loc.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Platform</span>
+                <select name="platform">
+                    <option value="">All</option>
+                    <option value="google" {% if filters.platform == 'google' %}selected{% endif %}>Google</option>
+                    <option value="yelp" {% if filters.platform == 'yelp' %}selected{% endif %}>Yelp</option>
+                </select>
+            </label>
+            <label>
+                <span>Date preset</span>
+                <select name="date_preset">
+                    <option value="1d" {% if filters.date_preset == '1d' %}selected{% endif %}>1 day ago</option>
+                    <option value="3d" {% if filters.date_preset == '3d' %}selected{% endif %}>3 days ago</option>
+                    <option value="7d" {% if filters.date_preset == '7d' %}selected{% endif %}>7 days ago</option>
+                    <option value="30d" {% if filters.date_preset == '30d' %}selected{% endif %}>30 days ago</option>
+                    <option value="all" {% if filters.date_preset == 'all' %}selected{% endif %}>All available</option>
+                </select>
+            </label>
+            <label>
+                <span>Date from</span>
+                <input type="date" name="date_from" value="{{ filters.date_from }}">
+            </label>
+            <label>
+                <span>Date to</span>
+                <input type="date" name="date_to" value="{{ filters.date_to }}">
+            </label>
+            <label>
+                <span>Rating</span>
+                <select name="rating">
+                    <option value="">All ratings</option>
+                    {% for r in range(1, 6) %}
+                    <option value="{{ r }}" {% if filters.rating == r %}selected{% endif %}>{{ r }} star</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Status</span>
+                <select name="status">
+                    <option value="">Needs attention</option>
+                    <option value="unreplied" {% if filters.status == 'unreplied' %}selected{% endif %}>Unreplied</option>
+                    <option value="replied" {% if filters.status == 'replied' %}selected{% endif %}>Replied</option>
+                    <option value="pending_review" {% if filters.status == 'pending_review' %}selected{% endif %}>Pending review</option>
+                    <option value="approved" {% if filters.status == 'approved' %}selected{% endif %}>Approved</option>
+                    <option value="posted" {% if filters.status == 'posted' %}selected{% endif %}>Posted</option>
+                    <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>Failed</option>
+                    <option value="handled" {% if filters.status == 'handled' %}selected{% endif %}>Handled</option>
+                </select>
+            </label>
+            <div class="filter-submit">
+                <button type="submit" class="btn">Apply Filters</button>
+                <a href="/reviews" class="btn btn-secondary">Reset</a>
+            </div>
+        </form>
+    </div>
 </section>
 
-<p class="text-muted">Showing {{ items|length }} of {{ total }} reviews on page {{ page }}.</p>
+<section class="workspace-section">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Queue</p>
+                <h2>{{ total }} reviews matched</h2>
+                <p class="section-copy">Showing {{ items|length }} reviews on page {{ page }}. Customer review text is shown exactly as collected.</p>
+            </div>
+        </div>
 
-<section class="panel table-panel">
-    <table class="data-table review-table">
-        <thead>
-            <tr>
-                <th><input type="checkbox" id="selectAllReviews" onclick="toggleAllReviews(this.checked)"></th>
-                <th>Platform</th>
-                <th>Store</th>
-                <th>Reviewer</th>
-                <th>Date</th>
-                <th>Rating</th>
-                <th>Review</th>
-                <th>Owner Reply</th>
-                <th>AI Suggestion</th>
-                <th>Source</th>
-                <th>Status</th>
-                <th></th>
-            </tr>
-        </thead>
-        <tbody>
+        <div class="review-queue">
             {% for item in items %}
-            <tr>
-                <td><input type="checkbox" class="review-select" value="{{ item.review.id }}"></td>
-                <td><span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span></td>
-                <td>{{ item.location.name if item.location else '-' }}</td>
-                <td>{{ item.review.reviewer_name or 'Anonymous' }}</td>
-                <td>{{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else '-' }}</td>
-                <td class="rating-{{ 'positive' if item.review.rating >= 4 else 'negative' }}">{{ item.review.rating }}/5</td>
-                <td class="review-snippet">{{ item.review.review_text or 'No written comment' }}</td>
-                <td>
-                    {% if item.review.has_owner_reply %}
-                    <span class="status status-replied">Visible reply</span>
-                    <p class="mini-copy">{{ item.review.detected_owner_reply_text or 'Reply detected on source page.' }}</p>
-                    {% else %}
-                    <span class="status status-unreplied">No reply visible</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if item.suggestion %}
-                    <p class="mini-copy">{{ item.suggestion.suggestion_text }}</p>
-                    <p class="text-muted">{{ item.suggestion.tone_mode.replace('_', ' ') }}</p>
-                    {% elif item.reply %}
-                    <p class="mini-copy">{{ item.reply.ai_reply_text }}</p>
-                    {% else %}
-                    <span class="text-muted">No suggestion yet</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if item.source %}
-                    <span class="status status-{{ item.source.session_status }}">{{ item.source.session_status.replace('_', ' ') }}</span>
-                    {% else %}
-                    <span class="text-muted">Unknown</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
-                    {% if item.review.is_handled %}
-                    <p class="text-muted">Handled by {{ item.review.handled_by or 'operator' }}</p>
-                    {% endif %}
-                </td>
-                <td><a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open</a></td>
-            </tr>
-            {% else %}
-            <tr><td colspan="12" class="text-center text-muted">No reviews matched the current filters.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</section>
+            <article class="review-row">
+                <div class="review-row-select">
+                    <input type="checkbox" class="review-select" value="{{ item.review.id }}">
+                </div>
+                <div class="review-row-main">
+                    <div class="review-row-top">
+                        <div class="review-row-identity">
+                            <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
+                            <h3>{{ item.review.reviewer_name or 'Anonymous' }}</h3>
+                            <span class="text-muted">{{ item.location.name if item.location else '-' }}</span>
+                        </div>
+                        <div class="review-row-statuses">
+                            <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+                            {% if item.source %}
+                            <span class="status status-{{ item.source.session_status }}">{{ item.source.session_status.replace('_', ' ') }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
 
-<div class="pagination">
-    {% if page > 1 %}
-    <a href="?page={{ page - 1 }}" class="btn btn-secondary btn-sm">Prev</a>
-    {% endif %}
-    {% if items|length == per_page %}
-    <a href="?page={{ page + 1 }}" class="btn btn-secondary btn-sm">Next</a>
-    {% endif %}
-</div>
+                    <div class="review-row-meta">
+                        <div class="star-rating" aria-label="{{ item.review.rating }} out of 5 stars">
+                            {% for _ in range(item.review.rating) %}
+                            <span class="star filled">&#9733;</span>
+                            {% endfor %}
+                            {% for _ in range(5 - item.review.rating) %}
+                            <span class="star">&#9733;</span>
+                            {% endfor %}
+                        </div>
+                        <span>{{ item.review.rating }}/5</span>
+                        <span>{{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</span>
+                    </div>
+
+                    <div class="review-row-grid">
+                        <div class="review-copy-block">
+                            <span class="block-label">Customer review</span>
+                            <p class="review-copy-full">{{ item.review.review_text or 'No written comment' }}</p>
+                        </div>
+                        <div class="review-copy-block">
+                            <span class="block-label">Owner reply on source</span>
+                            {% if item.review.has_owner_reply %}
+                            <p class="review-copy-full">{{ item.review.detected_owner_reply_text or 'Reply detected on source page.' }}</p>
+                            {% else %}
+                            <p class="review-copy-full text-muted">No owner reply visible on the source page.</p>
+                            {% endif %}
+                        </div>
+                        <div class="review-copy-block">
+                            <span class="block-label">AI suggestion</span>
+                            {% if item.suggestion %}
+                            <p class="review-copy-full">{{ item.suggestion.suggestion_text }}</p>
+                            <p class="text-muted">{{ item.suggestion.tone_mode.replace('_', ' ') }}</p>
+                            {% elif item.reply %}
+                            <p class="review-copy-full">{{ item.reply.ai_reply_text }}</p>
+                            <p class="text-muted">{{ item.reply.tone_mode.replace('_', ' ') if item.reply.tone_mode else 'Suggestion available' }}</p>
+                            {% else %}
+                            <p class="review-copy-full text-muted">No suggestion yet.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="review-row-side">
+                    <a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open</a>
+                    {% if item.review.source_url %}
+                    <a href="{{ item.review.source_url }}" target="_blank" rel="noreferrer" class="ghost-link">Source page</a>
+                    {% endif %}
+                </div>
+            </article>
+            {% else %}
+            <p class="empty-state">No reviews matched the current filters.</p>
+            {% endfor %}
+        </div>
+
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="?page={{ page - 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Prev</a>
+            {% endif %}
+            {% if items|length == per_page %}
+            <a href="?page={{ page + 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Next</a>
+            {% endif %}
+        </div>
+    </div>
+</section>
 {% endblock %}

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.providers.base import (
     ProviderAuthRequiredError,
     ProviderConfigError,
@@ -28,8 +29,13 @@ class PageReviewProvider(ReviewProvider):
         from playwright.async_api import async_playwright
 
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
-            context_kwargs = {"viewport": {"width": 1600, "height": 1200}}
+            browser = await playwright.chromium.launch(headless=True, **self._browser_launch_kwargs())
+            context_kwargs = {
+                "viewport": {"width": 1600, "height": 1200},
+                "locale": settings.review_browser_locale,
+                "timezone_id": settings.review_browser_timezone,
+                "extra_http_headers": {"Accept-Language": f"{settings.review_browser_locale},en;q=0.9"},
+            }
             storage_state = self._storage_state_path()
             if storage_state:
                 context_kwargs["storage_state"] = storage_state
@@ -53,8 +59,13 @@ class PageReviewProvider(ReviewProvider):
         from playwright.async_api import async_playwright
 
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
-            context_kwargs = {"viewport": {"width": 1600, "height": 1200}}
+            browser = await playwright.chromium.launch(headless=True, **self._browser_launch_kwargs())
+            context_kwargs = {
+                "viewport": {"width": 1600, "height": 1200},
+                "locale": settings.review_browser_locale,
+                "timezone_id": settings.review_browser_timezone,
+                "extra_http_headers": {"Accept-Language": f"{settings.review_browser_locale},en;q=0.9"},
+            }
             storage_state = self._storage_state_path()
             if storage_state:
                 context_kwargs["storage_state"] = storage_state
@@ -139,12 +150,12 @@ class PageReviewProvider(ReviewProvider):
         if not review_id:
             return None
 
-        review_text = await self._extract_text(element, "review_text")
-        reviewer_name = await self._extract_text(element, "reviewer_name")
-        rating_text = await self._extract_attr_or_text(element, "rating")
-        review_date_text = await self._extract_text(element, "review_date")
-        reply_text = await self._extract_text(element, "owner_reply_text")
-        reply_date_text = await self._extract_text(element, "owner_reply_date")
+        review_text = self.normalize_text(await self._extract_text(element, "review_text"))
+        reviewer_name = self.normalize_text(await self._extract_text(element, "reviewer_name"))
+        rating_text = self.normalize_text(await self._extract_attr_or_text(element, "rating"))
+        review_date_text = self.normalize_text(await self._extract_text(element, "review_date"))
+        reply_text = self.normalize_text(await self._extract_text(element, "owner_reply_text"))
+        reply_date_text = self.normalize_text(await self._extract_text(element, "owner_reply_date"))
 
         return ProviderReview(
             external_review_id=review_id,
@@ -228,7 +239,10 @@ class PageReviewProvider(ReviewProvider):
 
     async def _extract_attr_or_text(self, element, key: str) -> str | None:
         selectors = self._selector_value(key)
-        attributes = self.settings.get(f"{key}_attributes") or ["aria-label", "title", "data-rating"]
+        default_attributes = ["aria-label", "title", "data-rating"]
+        if key == "review_id":
+            default_attributes = ["data-review-id", "data-testid", "aria-label", "title"]
+        attributes = self.settings.get(f"{key}_attributes") or default_attributes
         for selector in selectors:
             try:
                 node = await element.query_selector(selector)
@@ -262,3 +276,18 @@ class PageReviewProvider(ReviewProvider):
             return None
         path = Path(reference)
         return str(path) if path.exists() else None
+
+    def _browser_launch_kwargs(self) -> dict[str, Any]:
+        proxy_server = self.settings.get("proxy_server")
+        if not proxy_server:
+            if self.platform == "google":
+                proxy_server = settings.google_browser_proxy
+            elif self.platform == "yelp":
+                proxy_server = settings.yelp_browser_proxy
+
+        if proxy_server:
+            return {
+                "proxy": {"server": proxy_server},
+                "args": [f"--lang={settings.review_browser_locale}", "--disable-blink-features=AutomationControlled"],
+            }
+        return {"args": [f"--lang={settings.review_browser_locale}", "--disable-blink-features=AutomationControlled"]}

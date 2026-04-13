@@ -6,11 +6,11 @@ import logging
 import time
 from datetime import datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import AsyncSessionLocal
-from app.models import AuthSession, FetchLog, Job, Location, Reply, Review, ReviewSource
+from app.models import AuthSession, EmailAlert, FetchLog, Job, Location, Reply, ReplySuggestion, Review, ReviewSource
 from app.providers import ProviderAuthRequiredError, ProviderFetchError, get_provider
 
 logger = logging.getLogger("review_system.fetch_worker")
@@ -160,6 +160,8 @@ async def _upsert_reviews(session, source: ReviewSource, reviews) -> int:
     if not reviews:
         return 0
 
+    await _purge_legacy_placeholder_reviews(session, source)
+
     external_ids = [review.external_review_id for review in reviews]
     existing_ids = set(
         (
@@ -222,6 +224,35 @@ async def _upsert_reviews(session, source: ReviewSource, reviews) -> int:
         await session.execute(stmt)
 
     return len([review for review in reviews if review.external_review_id not in existing_ids])
+
+
+async def _purge_legacy_placeholder_reviews(session, source: ReviewSource) -> None:
+    if source.platform != "google":
+        return
+
+    placeholder_ids = (
+        await session.execute(
+            select(Review.id).where(
+                and_(
+                    Review.source_id == source.id,
+                    Review.platform == "google",
+                    Review.external_review_id.like("google-%"),
+                    Review.rating == 0,
+                    Review.review_date.is_(None),
+                    or_(Review.reviewer_name == "Anonymous", Review.reviewer_name.is_(None)),
+                )
+            )
+        )
+    ).scalars().all()
+
+    if not placeholder_ids:
+        return
+
+    await session.execute(delete(EmailAlert).where(EmailAlert.review_id.in_(placeholder_ids)))
+    await session.execute(delete(Job).where(Job.review_id.in_(placeholder_ids)))
+    await session.execute(delete(ReplySuggestion).where(ReplySuggestion.review_id.in_(placeholder_ids)))
+    await session.execute(delete(Reply).where(Reply.review_id.in_(placeholder_ids)))
+    await session.execute(delete(Review).where(Review.id.in_(placeholder_ids)))
 
 
 async def _enqueue_new_review_jobs(session, source: ReviewSource, reviews) -> None:

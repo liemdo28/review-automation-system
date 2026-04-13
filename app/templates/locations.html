@@ -1,98 +1,95 @@
 {% extends "base.html" %}
-{% block title %}Locations - Review Ops{% endblock %}
+{% block title %}Locations - START{% endblock %}
+{% block shell_title %}Store-by-store source readiness, sync control, and login management.{% endblock %}
+{% block shell_subtitle %}Open the exact Google or Yelp source you want, capture the right session once, and keep the collection workflow anchored to the correct review surface.{% endblock %}
 {% block content %}
-<section class="page-header compact">
-    <div>
-        <p class="eyebrow">Source Operations</p>
-        <h1>Store sources and login readiness</h1>
-        <p class="hero-copy">Use the login button on the exact Google or Yelp source you want. START will open a dedicated login window for that source, save the session, and then sync that source again.</p>
-    </div>
-    <div class="hero-actions">
-        <button class="btn" onclick="triggerFetch()">Sync All Sources</button>
-        <a href="/admin/sources" class="btn btn-secondary">Open Admin Settings</a>
+<section class="workspace-section">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Source Operations</p>
+                <h2>Login and sync workspace</h2>
+                <p class="section-copy">Use source-specific login for one store or platform-wide login when the same account should power every store on Google or Yelp.</p>
+            </div>
+            <div class="section-actions">
+                <button class="btn" onclick="triggerFetch()">Sync All Sources</button>
+                <a href="/admin/sources" class="btn btn-secondary">Open Admin Settings</a>
+            </div>
+        </div>
+
+        <div class="info-strip">
+            <strong>Recommended flow:</strong>
+            <span>Click <strong>Login Google</strong> or <strong>Login Yelp</strong> for one source, or use <strong>Login All Google</strong> / <strong>Login All Yelp</strong> to share one session across all stores on that platform.</span>
+        </div>
     </div>
 </section>
 
-<section class="inline-note source-login-note">
-    <strong>Recommended flow:</strong>
-    <span>Click <strong>Login Google</strong> or <strong>Login Yelp</strong> on the source you need, finish sign-in in the opened window, then press <strong>Enter</strong> in that bootstrap window to save the session.</span>
-</section>
-
-<div class="location-workspaces">
+<section class="workspace-section workspace-stack">
     {% for item in locations %}
-    <section class="location-workspace">
-        <div class="location-workspace-head">
-            <div class="location-identity">
+    <div class="panel store-panel">
+        <div class="store-panel-head">
+            <div>
                 <p class="eyebrow">Store {{ loop.index }}</p>
                 <h2>{{ item.loc.name }}</h2>
-                <p class="location-address">{{ item.loc.address }}</p>
+                <p class="text-muted">{{ item.loc.address }}</p>
                 <p class="text-muted">{{ item.loc.city }}, {{ item.loc.state }}</p>
             </div>
-            <div class="location-actions">
+            <div class="section-actions">
                 <button class="btn btn-secondary" onclick="triggerFetch('location_id={{ item.loc.id }}')">Sync Store</button>
                 <a href="/reviews?location_id={{ item.loc.id }}" class="btn btn-secondary">Open Queue</a>
             </div>
         </div>
 
-        <div class="location-metrics">
-            <div class="location-metric">
+        <div class="metric-grid compact-metrics">
+            <article class="metric-tile">
                 <span class="metric-label">Google open</span>
-                <strong>{{ item.google_count }}</strong>
-            </div>
-            <div class="location-metric">
+                <strong class="metric-value">{{ item.google_count }}</strong>
+            </article>
+            <article class="metric-tile accent-yelp">
                 <span class="metric-label">Yelp open</span>
-                <strong>{{ item.yelp_count }}</strong>
-            </div>
-            <div class="location-metric">
+                <strong class="metric-value">{{ item.yelp_count }}</strong>
+            </article>
+            <article class="metric-tile accent-neutral">
                 <span class="metric-label">Sources</span>
-                <strong>{{ item.sources|length }}</strong>
-            </div>
+                <strong class="metric-value">{{ item.sources|length }}</strong>
+            </article>
         </div>
 
-        <div class="source-table">
+        <div class="store-source-list">
             {% for source in item.sources %}
-            <article class="source-row source-row-{{ source.session_status }}">
-                <div class="source-row-main">
-                    <div class="source-row-title">
-                        <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
-                        <strong>{{ source.source_label or source.platform|title }}</strong>
-                    </div>
-                    <p class="text-muted source-url">{{ source.source_url }}</p>
-                </div>
-
-                <div class="source-row-meta">
-                    <div class="source-meta-block">
-                        <span class="meta-caption">Session</span>
+            <article class="store-source-row">
+                <div class="store-source-main">
+                    <div class="store-source-top">
+                        <div class="store-source-title">
+                            <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
+                            <strong>{{ source.source_label or source.platform|title }}</strong>
+                        </div>
                         <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
                     </div>
-                    <div class="source-meta-block">
-                        <span class="meta-caption">Last successful sync</span>
-                        <strong>
-                            {% if source.last_successful_sync_at %}
-                            {{ source.last_successful_sync_at.strftime('%m/%d %H:%M') }}
-                            {% else %}
-                            Not synced yet
-                            {% endif %}
-                        </strong>
+                    <p class="store-source-url">{{ source.source_url }}</p>
+                    <div class="store-source-meta">
+                        <div>
+                            <span class="metric-label">Last successful sync</span>
+                            <strong>{% if source.last_successful_sync_at %}{{ source.last_successful_sync_at.strftime('%m/%d %H:%M') }}{% else %}Not synced yet{% endif %}</strong>
+                        </div>
+                        <div>
+                            <span class="metric-label">Auth mode</span>
+                            <strong>{{ source.auth_mode }}</strong>
+                        </div>
                     </div>
                 </div>
-
-                <div class="source-row-actions">
-                    <button
-                        class="btn btn-login btn-platform-{{ source.platform }}"
-                        onclick='launchSessionBootstrap({{ source.id }}, {{ (source.source_label or source.platform|title)|tojson }}, {{ source.platform|tojson }})'
-                    >
-                        Login {{ source.platform|title }}
-                    </button>
+                <div class="store-source-actions">
+                    <button class="btn btn-login btn-platform-{{ source.platform }}" onclick='launchSessionBootstrap({{ source.id }}, {{ (source.source_label or source.platform|title)|tojson }}, {{ source.platform|tojson }})'>Login {{ source.platform|title }}</button>
+                    <button class="btn btn-secondary btn-sm" onclick='launchSharedPlatformLogin({{ source.id }}, {{ source.platform|tojson }})'>Login All {{ source.platform|title }}</button>
                     <button class="btn btn-secondary btn-sm" onclick="triggerFetch('source_id={{ source.id }}')">Sync</button>
                     <a href="{{ source.source_url }}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-sm">Open Page</a>
                 </div>
             </article>
             {% else %}
-            <p class="text-muted">No review sources configured.</p>
+            <p class="empty-state">No review sources configured.</p>
             {% endfor %}
         </div>
-    </section>
+    </div>
     {% endfor %}
-</div>
+</section>
 {% endblock %}

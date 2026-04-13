@@ -84,7 +84,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
 
     recent_reviews_query = apply_review_filters(
         select(Review),
-        ReviewFilters(date_preset="7d"),
+        ReviewFilters(date_preset="all"),
     ).order_by(Review.review_date.desc().nullslast(), Review.last_seen_at.desc())
     recent_reviews = (await db.execute(recent_reviews_query.limit(10))).scalars().all()
     recent_review_items = []
@@ -133,7 +133,7 @@ async def reviews_page(
     platform: str | None = None,
     rating: str | None = None,
     status: str | None = None,
-    date_preset: str | None = "7d",
+    date_preset: str | None = "all",
     date_from: str | None = None,
     date_to: str | None = None,
     page: int = 1,
@@ -212,6 +212,11 @@ async def reviews_page(
                 "date_from": parsed_date_from.isoformat() if parsed_date_from else "",
                 "date_to": parsed_date_to.isoformat() if parsed_date_to else "",
             },
+            "page_query": "&".join(
+                f"{key}={value}"
+                for key, value in request.query_params.multi_items()
+                if key != "page" and value != ""
+            ),
         },
     )
 
@@ -362,13 +367,15 @@ async def admin_update_source(
 @router.post("/admin/sources/{source_id}/sessions")
 async def admin_add_source_session(
     source_id: int,
-    session_reference: str = Form(...),
+    session_reference: str = Form(""),
     session_status: str = Form("active"),
     expires_at: str = Form(""),
     db: AsyncSession = Depends(get_db),
 ):
     source = await db.get(ReviewSource, source_id)
     if not source:
+        return RedirectResponse("/admin/sources", status_code=303)
+    if not session_reference.strip():
         return RedirectResponse("/admin/sources", status_code=303)
 
     parsed_expiry = None

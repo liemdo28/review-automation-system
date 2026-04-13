@@ -8,6 +8,7 @@ import subprocess
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -45,6 +46,7 @@ class AuthSessionPayload(BaseModel):
     session_reference: str
     status: str = "active"
     expires_at: datetime | None = None
+    source_url_override: str | None = None
 
 
 def _optional_int(value: str | None) -> int | None:
@@ -66,6 +68,56 @@ def _repo_path(value: str) -> Path:
     if path.is_absolute():
         return path
     return REPO_ROOT / path
+
+
+def _normalized_source_url_override(platform: str, source_url_override: str | None) -> str | None:
+    if not source_url_override:
+        return None
+
+    candidate = source_url_override.strip()
+    lowered = candidate.lower()
+    platform = (platform or "").lower()
+
+    if platform == "google" and "/local/business/" in lowered and "/customers/reviews" in lowered:
+        return _force_google_review_language(candidate)
+    if platform == "yelp" and "yelp.com/biz/" in lowered:
+        return candidate
+    return None
+
+
+def _force_google_review_language(url: str) -> str:
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["hl"] = "en"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+async def _store_session_for_sources(
+    db: AsyncSession,
+    sources: list[ReviewSource],
+    *,
+    session_reference: str,
+    status: str,
+    expires_at: datetime | None = None,
+) -> list[int]:
+    from app.models import AuthSession
+
+    updated_source_ids: list[int] = []
+    for target_source in sources:
+        db.add(
+            AuthSession(
+                source_id=target_source.id,
+                platform=target_source.platform,
+                session_reference=session_reference,
+                expires_at=expires_at,
+                last_validated_at=datetime.utcnow(),
+                status=status,
+            )
+        )
+        target_source.session_status = status
+        target_source.last_auth_at = datetime.utcnow()
+        updated_source_ids.append(target_source.id)
+    return updated_source_ids
 
 
 @router.get("/health")
@@ -109,7 +161,7 @@ async def list_reviews(
     platform: str | None = None,
     rating: str | None = None,
     status: str | None = None,
-    date_preset: str | None = "7d",
+    date_preset: str | None = "all",
     date_from: str | None = None,
     date_to: str | None = None,
     needs_attention_only: bool = True,
@@ -571,39 +623,85 @@ async def update_source(source_id: int, payload: SourceUpdatePayload, db: AsyncS
 
 
 @router.post("/sources/{source_id}/sessions")
-async def create_source_session(source_id: int, payload: AuthSessionPayload, db: AsyncSession = Depends(get_db)):
+async def create_source_session(
+    source_id: int,
+    payload: AuthSessionPayload,
+    share_scope: str = "source",
+    db: AsyncSession = Depends(get_db),
+):
     source = await db.get(ReviewSource, source_id)
     if not source:
         raise HTTPException(404, "Source not found")
 
-    from app.models import AuthSession
+    if share_scope not in {"source", "platform"}:
+        raise HTTPException(400, "share_scope must be 'source' or 'platform'")
 
-    auth_session = AuthSession(
-        source_id=source.id,
-        platform=source.platform,
+    target_sources = [source]
+    if share_scope == "platform":
+        target_sources = (
+            await db.execute(
+                select(ReviewSource)
+                .where(
+                    ReviewSource.platform == source.platform,
+                    ReviewSource.is_active.is_(True),
+                )
+                .order_by(ReviewSource.location_id, ReviewSource.id)
+            )
+        ).scalars().all()
+
+    updated_source_ids = await _store_session_for_sources(
+        db,
+        target_sources,
         session_reference=payload.session_reference,
-        expires_at=payload.expires_at,
-        last_validated_at=datetime.utcnow(),
         status=payload.status,
+        expires_at=payload.expires_at,
     )
-    db.add(auth_session)
-    source.session_status = payload.status
-    source.last_auth_at = datetime.utcnow()
+
+    source_url_updated = False
+    source_url_override = _normalized_source_url_override(source.platform, payload.source_url_override)
+    if source_url_override and share_scope == "source":
+        source.source_url = source_url_override
+        source_url_updated = True
+
     await db.commit()
-    return {"status": "ok", "session_id": auth_session.id}
+    return {
+        "status": "ok",
+        "share_scope": share_scope,
+        "updated_source_ids": updated_source_ids,
+        "source_url_updated": source_url_updated,
+        "source_url": source.source_url if source_url_updated else None,
+    }
 
 
 @router.post("/sources/{source_id}/bootstrap")
-async def bootstrap_source_session(source_id: int, db: AsyncSession = Depends(get_db)):
+async def bootstrap_source_session(
+    source_id: int,
+    share_scope: str = "source",
+    db: AsyncSession = Depends(get_db),
+):
     source = await db.get(ReviewSource, source_id)
     if not source:
         raise HTTPException(404, "Source not found")
     if not source.source_url:
         raise HTTPException(400, "Source URL is missing")
+    if share_scope not in {"source", "platform"}:
+        raise HTTPException(400, "share_scope must be 'source' or 'platform'")
 
     session_dir = _repo_path(settings.session_storage_dir)
     session_dir.mkdir(parents=True, exist_ok=True)
-    session_path = session_dir / f"source-{source.id}-{source.platform}.json"
+    if share_scope == "platform":
+        session_path = session_dir / f"platform-{source.platform}.json"
+        launch_label = f"All {source.platform.title()} Sources"
+        if source.platform == "google":
+            launch_url = settings.google_login_url
+        elif source.platform == "yelp":
+            launch_url = settings.yelp_login_url
+        else:
+            launch_url = source.source_url
+    else:
+        session_path = session_dir / f"source-{source.id}-{source.platform}.json"
+        launch_label = source.source_label or f"{source.platform.title()} source"
+        launch_url = source.source_url
     script_path = REPO_ROOT / "scripts" / "bootstrap_source_session.ps1"
     if not script_path.exists():
         raise HTTPException(500, "Bootstrap script is missing")
@@ -617,12 +715,14 @@ async def bootstrap_source_session(source_id: int, db: AsyncSession = Depends(ge
         str(script_path),
         "-SourceId",
         str(source.id),
+        "-ShareScope",
+        share_scope,
         "-Platform",
         source.platform,
         "-SourceUrl",
-        source.source_url,
+        launch_url,
         "-SourceLabel",
-        source.source_label or f"{source.platform.title()} source",
+        launch_label,
         "-OutputPath",
         str(session_path),
         "-ApiBaseUrl",
@@ -640,9 +740,11 @@ async def bootstrap_source_session(source_id: int, db: AsyncSession = Depends(ge
     return {
         "status": "bootstrap_started",
         "source_id": source.id,
+        "share_scope": share_scope,
         "session_path": str(session_path),
         "platform": source.platform,
-        "source_label": source.source_label,
+        "source_label": launch_label,
+        "launch_url": launch_url,
     }
 
 
