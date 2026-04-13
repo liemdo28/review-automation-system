@@ -1,29 +1,113 @@
 {% extends "base.html" %}
-{% block title %}Needs Attention - START{% endblock %}
-{% block shell_title %}One queue for unreplied reviews, reply suggestions, and operator approval.{% endblock %}
-{% block shell_subtitle %}The queue keeps the original customer language, surfaces rating and source status fast, and gives staff a cleaner approval flow than a raw data table.{% endblock %}
+{% block title %}Review Queue - START{% endblock %}
+{% block shell_title %}Review Queue{% endblock %}
+{% block shell_subtitle %}Work the queue like a task list: filter fast, keep AI decision context visible, and move through the safest actions first.{% endblock %}
+
+{% block ai_panel %}
+<div class="panel ai-panel-card">
+    <div class="section-head">
+        <div>
+            <p class="eyebrow">AI Detail Panel</p>
+            <h2>{% if focus_review %}{{ focus_review.reviewer_name or 'Anonymous' }}{% else %}Select a review{% endif %}</h2>
+            <p class="section-copy">
+                {% if focus_review %}
+                {{ focus_review.auto_reply_decision_reason or 'Inspect why this review is safe, blocked, or escalated before acting.' }}
+                {% else %}
+                Click <strong>Inspect</strong> on a queue card to keep review context visible here while you work through the list.
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    {% if focus_review %}
+    <div class="ai-context-list">
+        <article class="ai-context-row"><span>Store</span><strong>{{ focus_location.name if focus_location else '-' }}</strong></article>
+        <article class="ai-context-row"><span>Platform</span><strong>{{ focus_review.platform }}</strong></article>
+        <article class="ai-context-row"><span>Rating</span><strong>{{ focus_review.rating }}/5</strong></article>
+        <article class="ai-context-row"><span>Workflow</span><strong>{{ focus_review.workflow_status or 'unreplied' }}</strong></article>
+        <article class="ai-context-row"><span>Risk</span><strong>{{ focus_review.auto_reply_risk_level or '-' }}</strong></article>
+        <article class="ai-context-row"><span>Issue</span><strong>{{ focus_review.issue_category.replace('_', ' ') if focus_review.issue_category else '-' }}</strong></article>
+        <article class="ai-context-row"><span>Source status</span><strong>{{ focus_source.session_status if focus_source else '-' }}</strong></article>
+    </div>
+    <div class="review-copy-block">
+        <span class="block-label">Customer review</span>
+        <p class="review-copy-full">{{ focus_review.review_text or 'No written comment' }}</p>
+    </div>
+    <div class="review-copy-block">
+        <span class="block-label">AI reply draft</span>
+        <p class="review-copy-full">{{ focus_reply.ai_reply_text if focus_reply else 'No prepared draft yet.' }}</p>
+    </div>
+    <div class="ai-context-actions">
+        <a class="btn btn-sm" href="/reviews/{{ focus_review.id }}">Open Detail</a>
+        <button class="btn btn-secondary btn-sm" onclick="evaluateAutoReply({{ focus_review.id }})">Evaluate</button>
+        {% if focus_reply %}
+        <button class="btn btn-secondary btn-sm" onclick="approveReply({{ focus_review.id }})">Approve</button>
+        {% endif %}
+        {% if focus_source %}
+        <a class="btn btn-secondary btn-sm" href="{{ focus_source.resolved_source_url or focus_source.source_url }}" target="_blank" rel="noreferrer">Open Source</a>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="ai-context-list">
+        <article class="ai-context-row"><span>Current queue</span><strong>{{ total }} reviews</strong></article>
+        <article class="ai-context-row"><span>Auto eligible</span><strong>{{ shell_counts.auto_eligible }}</strong></article>
+        <article class="ai-context-row"><span>Escalated</span><strong>{{ shell_counts.escalated }}</strong></article>
+        <article class="ai-context-row"><span>Blocked auth</span><strong>{{ shell_counts.auth_blocked }}</strong></article>
+    </div>
+    <div class="ai-context-actions">
+        <a class="btn btn-secondary btn-sm" href="/auto-reply">Auto Reply workspace</a>
+        <a class="btn btn-secondary btn-sm" href="/audit">Audit workspace</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
 {% block content %}
 <section class="workspace-section">
-    <div class="panel">
+    <div class="panel sticky-tool-panel">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Queue Controls</p>
-                <h2>Review filters and bulk actions</h2>
-                <p class="section-copy">Filter by store, platform, time window, rating, and workflow status before you regenerate, export, or mark reviews as handled.</p>
+                <h2>Filter, select, and act</h2>
+                <p class="section-copy">Everything in the current filter can be selected, previewed for policy eligibility, and acted on in bulk.</p>
             </div>
             <div class="section-actions">
                 <button class="btn btn-secondary" onclick="triggerFetch()">Sync Queue</button>
             </div>
         </div>
 
-        <div class="action-strip">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAllReviews(true)">Select all on page</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkRegenerate()">Regenerate replies</button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="bulkExport()">Export CSV</button>
-            <button type="button" class="btn btn-sm" onclick="bulkMarkHandled()">Mark handled</button>
+        <div class="quick-filter-row">
+            <a href="/reviews?status=auto_post_eligible" class="command-chip">Auto Reply Ready</a>
+            <a href="/reviews?status=manual_review_required" class="command-chip">Needs Manual Review</a>
+            <a href="/reviews?ratings=1&ratings=2&ratings=3" class="command-chip">3 Stars and Below</a>
+            <a href="/reviews?status=escalated" class="command-chip">Escalated</a>
+            <a href="/reviews?status=blocked_auth" class="command-chip">Auth Blocked</a>
+            <a href="/reviews?date_preset=1d" class="command-chip">Today</a>
+            <a href="/reviews?date_preset=7d" class="command-chip">7 Days</a>
+            <a href="/reviews?date_preset=30d" class="command-chip">30 Days</a>
         </div>
 
-        <form method="get" class="filter-grid">
+        <div class="action-strip">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleCurrentPageSelection(true)">Select page</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="toggleFilteredSelection(true)">Select all filtered</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="clearReviewSelection()">Clear selection</button>
+            <span class="selection-count" id="selectedReviewCount">0 reviews selected</span>
+        </div>
+
+        <div class="selection-toolbar is-hidden" id="bulkActionBar">
+            <div class="selection-toolbar-copy">
+                <span class="eyebrow">Batch actions</span>
+                <strong id="bulkActionSummary">0 reviews selected</strong>
+            </div>
+            <div class="selection-toolbar-actions">
+                <button type="button" class="btn btn-sm" onclick="previewBulkAutoReplyUI()">Auto Reply</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="bulkRegenerate()">Regenerate</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="bulkExport()">Export</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="bulkMarkHandled()">Mark handled</button>
+            </div>
+        </div>
+
+        <form method="get" class="filter-grid compact-filter-grid" id="reviewFilterForm">
             <label>
                 <span>Store</span>
                 <select name="location_id">
@@ -60,15 +144,6 @@
                 <input type="date" name="date_to" value="{{ filters.date_to }}">
             </label>
             <label>
-                <span>Rating</span>
-                <select name="rating">
-                    <option value="">All ratings</option>
-                    {% for r in range(1, 6) %}
-                    <option value="{{ r }}" {% if filters.rating == r %}selected{% endif %}>{{ r }} star</option>
-                    {% endfor %}
-                </select>
-            </label>
-            <label>
                 <span>Status</span>
                 <select name="status">
                     <option value="">Needs attention</option>
@@ -79,10 +154,29 @@
                     <option value="posted" {% if filters.status == 'posted' %}selected{% endif %}>Posted</option>
                     <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>Failed</option>
                     <option value="handled" {% if filters.status == 'handled' %}selected{% endif %}>Handled</option>
+                    <option value="manual_review_required" {% if filters.status == 'manual_review_required' %}selected{% endif %}>Manual review required</option>
+                    <option value="auto_post_eligible" {% if filters.status == 'auto_post_eligible' %}selected{% endif %}>Auto-post eligible</option>
+                    <option value="escalated" {% if filters.status == 'escalated' %}selected{% endif %}>Escalated</option>
+                    <option value="blocked_auth" {% if filters.status == 'blocked_auth' %}selected{% endif %}>Blocked auth</option>
                 </select>
             </label>
+            <label class="wide-filter">
+                <span>Star filter</span>
+                <div class="star-filter-group">
+                    <label class="choice-chip">
+                        <input type="checkbox" id="rating-all" {% if not filters.ratings %}checked{% endif %}>
+                        <span>All</span>
+                    </label>
+                    {% for r in range(5, 0, -1) %}
+                    <label class="choice-chip">
+                        <input type="checkbox" name="ratings" value="{{ r }}" class="rating-filter-checkbox" {% if filters.ratings and r in filters.ratings %}checked{% endif %}>
+                        <span>{{ "★" * r }}</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </label>
             <div class="filter-submit">
-                <button type="submit" class="btn">Apply Filters</button>
+                <button type="submit" class="btn">Apply</button>
                 <a href="/reviews" class="btn btn-secondary">Reset</a>
             </div>
         </form>
@@ -90,96 +184,135 @@
 </section>
 
 <section class="workspace-section">
-    <div class="panel">
-        <div class="section-head">
+    <div class="selection-preview is-hidden" id="autoReplyPreviewPanel">
+        <div class="selection-preview-head">
             <div>
-                <p class="eyebrow">Queue</p>
-                <h2>{{ total }} reviews matched</h2>
-                <p class="section-copy">Showing {{ items|length }} reviews on page {{ page }}. Customer review text is shown exactly as collected.</p>
+                <p class="eyebrow">Auto Reply Preview</p>
+                <h3 id="autoReplyPreviewTitle">Preview selected reviews</h3>
+            </div>
+            <div class="selection-toolbar-actions">
+                <button type="button" class="btn btn-sm" id="confirmAutoReplyButton" onclick="bulkAutoReplyUI()">Confirm Auto Reply</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="hideAutoReplyPreview()">Close</button>
             </div>
         </div>
-
-        <div class="review-queue">
-            {% for item in items %}
-            <article class="review-row">
-                <div class="review-row-select">
-                    <input type="checkbox" class="review-select" value="{{ item.review.id }}">
-                </div>
-                <div class="review-row-main">
-                    <div class="review-row-top">
-                        <div class="review-row-identity">
-                            <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
-                            <h3>{{ item.review.reviewer_name or 'Anonymous' }}</h3>
-                            <span class="text-muted">{{ item.location.name if item.location else '-' }}</span>
-                        </div>
-                        <div class="review-row-statuses">
-                            <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
-                            {% if item.source %}
-                            <span class="status status-{{ item.source.session_status }}">{{ item.source.session_status.replace('_', ' ') }}</span>
-                            {% endif %}
-                        </div>
-                    </div>
-
-                    <div class="review-row-meta">
-                        <div class="star-rating" aria-label="{{ item.review.rating }} out of 5 stars">
-                            {% for _ in range(item.review.rating) %}
-                            <span class="star filled">&#9733;</span>
-                            {% endfor %}
-                            {% for _ in range(5 - item.review.rating) %}
-                            <span class="star">&#9733;</span>
-                            {% endfor %}
-                        </div>
-                        <span>{{ item.review.rating }}/5</span>
-                        <span>{{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</span>
-                    </div>
-
-                    <div class="review-row-grid">
-                        <div class="review-copy-block">
-                            <span class="block-label">Customer review</span>
-                            <p class="review-copy-full">{{ item.review.review_text or 'No written comment' }}</p>
-                        </div>
-                        <div class="review-copy-block">
-                            <span class="block-label">Owner reply on source</span>
-                            {% if item.review.has_owner_reply %}
-                            <p class="review-copy-full">{{ item.review.detected_owner_reply_text or 'Reply detected on source page.' }}</p>
-                            {% else %}
-                            <p class="review-copy-full text-muted">No owner reply visible on the source page.</p>
-                            {% endif %}
-                        </div>
-                        <div class="review-copy-block">
-                            <span class="block-label">AI suggestion</span>
-                            {% if item.suggestion %}
-                            <p class="review-copy-full">{{ item.suggestion.suggestion_text }}</p>
-                            <p class="text-muted">{{ item.suggestion.tone_mode.replace('_', ' ') }}</p>
-                            {% elif item.reply %}
-                            <p class="review-copy-full">{{ item.reply.ai_reply_text }}</p>
-                            <p class="text-muted">{{ item.reply.tone_mode.replace('_', ' ') if item.reply.tone_mode else 'Suggestion available' }}</p>
-                            {% else %}
-                            <p class="review-copy-full text-muted">No suggestion yet.</p>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-                <div class="review-row-side">
-                    <a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open</a>
-                    {% if item.review.source_url %}
-                    <a href="{{ item.review.source_url }}" target="_blank" rel="noreferrer" class="ghost-link">Source page</a>
-                    {% endif %}
-                </div>
-            </article>
-            {% else %}
-            <p class="empty-state">No reviews matched the current filters.</p>
-            {% endfor %}
+        <div class="selection-preview-grid">
+            <div class="selection-preview-block">
+                <span class="block-label">Eligible</span>
+                <strong id="autoReplyEligibleCount">0</strong>
+                <div id="autoReplyEligibleList" class="preview-list"></div>
+            </div>
+            <div class="selection-preview-block">
+                <span class="block-label">Blocked</span>
+                <strong id="autoReplyBlockedCount">0</strong>
+                <div id="autoReplyBlockedList" class="preview-list"></div>
+            </div>
         </div>
+    </div>
+</section>
 
-        <div class="pagination">
-            {% if page > 1 %}
-            <a href="?page={{ page - 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Prev</a>
-            {% endif %}
-            {% if items|length == per_page %}
-            <a href="?page={{ page + 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Next</a>
-            {% endif %}
+<section class="workspace-section">
+    <div class="queue-header-row">
+        <div>
+            <p class="eyebrow">AI Task Queue</p>
+            <h2>{{ total }} reviews matched</h2>
+            <p class="section-copy">Each card keeps customer text, AI recommendation, and workflow state in one place so operators can move review-by-review without losing context.</p>
         </div>
+        <label class="master-checkbox">
+            <input type="checkbox" id="selectAllReviews" onchange="handleMasterSelection(this.checked)">
+            <span>Select All</span>
+        </label>
+    </div>
+
+    <div class="review-queue task-card-grid">
+        {% for item in items %}
+        <article class="review-row ai-task-card store-accent-card" style="{{ store_theme_style(item.location) }}">
+            <div class="review-row-select">
+                <input type="checkbox" class="review-select" value="{{ item.review.id }}" onchange="syncReviewSelection()">
+            </div>
+            <div class="review-row-main">
+                <div class="review-row-top">
+                    <div class="review-row-identity">
+                        <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
+                        <h3>{{ item.review.reviewer_name or 'Anonymous' }}</h3>
+                        <span class="store-chip" style="{{ store_theme_style(item.location) }}">{{ item.location.name if item.location else '-' }}</span>
+                    </div>
+                    <div class="review-row-statuses">
+                        <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+                        {% if item.review.auto_reply_eligible %}
+                        <span class="status status-posted">auto eligible</span>
+                        {% endif %}
+                        {% if item.review.escalated %}
+                        <span class="status status-failed">escalated</span>
+                        {% endif %}
+                        {% if item.source %}
+                        <span class="status status-{{ item.source.session_status }}">{{ item.source.session_status.replace('_', ' ') }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="review-row-meta">
+                    <span class="store-dot" style="{{ store_theme_style(item.location) }}" aria-hidden="true"></span>
+                    <div class="star-rating" aria-label="{{ item.review.rating }} out of 5 stars">
+                        {% for _ in range(item.review.rating) %}<span class="star filled">&#9733;</span>{% endfor %}
+                        {% for _ in range(5 - item.review.rating) %}<span class="star">&#9733;</span>{% endfor %}
+                    </div>
+                    <span>{{ item.review.rating }}/5</span>
+                    <span>{{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</span>
+                    <span>{{ item.review.auto_reply_risk_level or 'risk n/a' }}</span>
+                    {% if item.review.severity_level %}<span class="status status-{{ item.review.severity_level }}">{{ item.review.severity_level }}</span>{% endif %}
+                </div>
+
+                <div class="review-row-grid ai-task-grid">
+                    <div class="review-copy-block">
+                        <span class="block-label">Customer review</span>
+                        <p class="review-copy-full review-copy-preview">{{ item.review.review_text or 'No written comment' }}</p>
+                    </div>
+                    <div class="review-copy-block">
+                        <span class="block-label">Issue summary</span>
+                        <p class="review-copy-full">{{ item.review.analysis_summary or item.review.issue_category or 'No analysis yet.' }}</p>
+                    </div>
+                    <div class="review-copy-block">
+                        <span class="block-label">AI recommendation</span>
+                        <p class="review-copy-full">{{ item.review.auto_reply_decision_reason or 'Decision not evaluated yet.' }}</p>
+                        {% if item.suggestion %}
+                        <p class="text-muted">{{ item.suggestion.tone_mode.replace('_', ' ') }} · {{ item.suggestion.confidence_note or 'No confidence note' }}</p>
+                        {% elif item.reply %}
+                        <p class="text-muted">{{ item.reply.tone_mode.replace('_', ' ') if item.reply.tone_mode else 'Draft available' }}</p>
+                        {% endif %}
+                        <div class="reply-preview-inline">
+                            <span class="reply-preview-label">Reply preview</span>
+                            <p class="reply-preview-text">
+                                {% if item.reply and item.reply.ai_reply_text %}
+                                {{ item.reply.ai_reply_text }}
+                                {% elif item.suggestion and item.suggestion.suggestion_text %}
+                                {{ item.suggestion.suggestion_text }}
+                                {% else %}
+                                No draft available yet.
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="review-row-side">
+                <a href="{{ request.url.path }}?{% if page_query %}{{ page_query }}&{% endif %}focus_id={{ item.review.id }}" class="btn btn-secondary btn-sm">Inspect</a>
+                <a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open Detail</a>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="evaluateAutoReply({{ item.review.id }})">Evaluate</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="markSingleHandled({{ item.review.id }})">Mark Handled</button>
+            </div>
+        </article>
+        {% else %}
+        <p class="empty-state">No reviews matched the current filters.</p>
+        {% endfor %}
+    </div>
+
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Prev</a>
+        {% endif %}
+        {% if items|length == per_page %}
+        <a href="?page={{ page + 1 }}{% if page_query %}&{{ page_query }}{% endif %}" class="btn btn-secondary btn-sm">Next</a>
+        {% endif %}
     </div>
 </section>
 {% endblock %}

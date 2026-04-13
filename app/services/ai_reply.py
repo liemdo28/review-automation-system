@@ -23,13 +23,20 @@ SYSTEM_PROMPT = (
     "Rules:\n"
     "- Never mention AI.\n"
     "- Preserve the review's original language. Do not translate the guest review or your reply into a different language.\n"
+    "- Keep the reply warm, human, and concise. Never sound robotic or stiff.\n"
+    "- 5-star reviews should feel upbeat, grateful, and welcoming.\n"
+    "- 3-4 star reviews should feel appreciative, calm, and improvement-minded.\n"
+    "- 1-2 star reviews should feel empathetic, steady, and non-defensive.\n"
     "- Do not invent facts.\n"
     "- Do not argue with the customer.\n"
     "- Do not over-apologize.\n"
     "- Do not offer compensation, refunds, or discounts unless explicitly told.\n"
+    "- Do not make legal admissions or promise refunds, discounts, or compensation.\n"
+    "- Stay appropriate for a US restaurant brand voice.\n"
     "- Negative reviews should acknowledge the concern, protect the brand, and invite offline follow-up if needed.\n"
     "- Positive reviews should thank the guest warmly, reinforce trust, and invite them back naturally.\n"
-    "- Output valid JSON with keys: suggestion_text, sentiment, issue_tags, risk_flags, confidence_note, reason_summary."
+    "- Read rating, review_text, and issue tags together. If the guest mentions food, service, price, wait time, or cleanliness, respond to that context naturally.\n"
+    "- Output valid JSON with keys: suggestion_text, sentiment, issue_tags, risk_flags, confidence_note, reason_summary, issue_category, severity_level, analysis_summary."
 )
 
 
@@ -42,11 +49,12 @@ def normalize_rating(raw: Any) -> int:
 def classify_review(review_text: str, rating: int) -> dict[str, Any]:
     text = (review_text or "").strip().lower()
     issue_map = {
-        "food": ["food", "dish", "meal", "taste", "flavor", "cold", "undercooked", "overcooked"],
-        "service": ["service", "server", "staff", "rude", "attitude", "host", "waiter"],
-        "wait_time": ["wait", "slow", "late", "line", "queue"],
-        "cleanliness": ["clean", "dirty", "messy", "smell", "hygiene"],
-        "pricing": ["price", "expensive", "cost", "value", "overpriced"],
+        "food": ["cold", "undercooked", "overcooked", "raw", "bland", "flavorless", "burnt", "stale"],
+        "service": ["rude", "attitude", "ignored", "unfriendly", "dismissive", "hostile"],
+        "wait_time": ["long wait", "waited", "slow", "late", "queue", "line", "took forever"],
+        "cleanliness": ["dirty", "messy", "smell", "hygiene", "unclean", "filthy"],
+        "pricing": ["expensive", "cost too much", "overpriced", "ripoff", "too pricey"],
+        "staff_attitude": ["manager was rude", "server was rude", "bartender was rude", "host was rude", "attitude"],
     }
     issue_tags = [tag for tag, words in issue_map.items() if any(word in text for word in words)]
 
@@ -74,12 +82,23 @@ def classify_review(review_text: str, rating: int) -> dict[str, Any]:
     else:
         sentiment = "negative"
 
+    positive_only_tags = {"positive_compliment", "no_text_rating_only"}
+    issue_category = issue_tags[0] if issue_tags else ("positive_compliment" if rating >= 4 else "general_feedback")
+    severity_level = "low"
+    if rating >= 4 and set(issue_tags).issubset(positive_only_tags):
+        severity_level = "low"
+    elif rating <= 2 or "cleanliness" in issue_tags:
+        severity_level = "high"
+    elif rating == 3 or any(tag not in positive_only_tags for tag in issue_tags):
+        severity_level = "medium"
+
     label_map = {
         "food": "complaint about food",
         "service": "complaint about service",
         "wait_time": "wait time",
         "cleanliness": "cleanliness",
         "pricing": "pricing",
+        "staff_attitude": "staff attitude",
         "no_text_rating_only": "no-text rating only",
         "positive_compliment": "positive compliment",
         "mixed_sentiment": "mixed sentiment",
@@ -96,36 +115,136 @@ def classify_review(review_text: str, rating: int) -> dict[str, Any]:
         else "Moderate confidence because the review has limited detail."
     )
 
+    if rating <= 3:
+        analysis_summary = (
+            f"Flagged for audit because this is a {rating}-star review. Primary issue: {label_map.get(issue_category, issue_category)}. "
+            f"Severity is {severity_level}. Suggested handling: {'contact customer' if severity_level == 'high' else 'reply only'}."
+        )
+    else:
+        analysis_summary = (
+            f"Positive review with primary theme: {label_map.get(issue_category, issue_category)} and low operational risk."
+        )
+
     return {
         "sentiment": sentiment,
         "issue_tags": issue_tags,
         "risk_flags": risk_flags,
         "reason_summary": reason_summary,
         "confidence_note": confidence_note,
+        "issue_category": issue_category,
+        "severity_level": severity_level,
+        "analysis_summary": analysis_summary,
     }
+
+
+def sanitize_review_signals(
+    review_text: str,
+    rating: int,
+    *,
+    issue_tags: list[str] | None = None,
+    risk_flags: list[str] | None = None,
+    sentiment: str | None = None,
+    reason_summary: str | None = None,
+    issue_category: str | None = None,
+    severity_level: str | None = None,
+    analysis_summary: str | None = None,
+    confidence_note: str | None = None,
+) -> dict[str, Any]:
+    baseline = classify_review(review_text, rating)
+    normalized = {
+        "sentiment": sentiment or baseline["sentiment"],
+        "issue_tags": list(issue_tags or baseline["issue_tags"] or []),
+        "risk_flags": list(risk_flags or baseline["risk_flags"] or []),
+        "reason_summary": reason_summary or baseline["reason_summary"],
+        "issue_category": issue_category or baseline["issue_category"],
+        "severity_level": severity_level or baseline["severity_level"],
+        "analysis_summary": analysis_summary or baseline["analysis_summary"],
+        "confidence_note": confidence_note or baseline["confidence_note"],
+    }
+
+    negative_tags = {"food", "service", "wait_time", "cleanliness", "pricing", "staff_attitude", "service_recovery"}
+    positive_only_tags = {"positive_compliment", "no_text_rating_only"}
+    baseline_tags = set(baseline.get("issue_tags") or [])
+    normalized_tags = [str(tag).strip().lower() for tag in normalized["issue_tags"] if str(tag).strip()]
+    normalized_risk_flags = [str(flag).strip().lower() for flag in normalized["risk_flags"] if str(flag).strip()]
+
+    if rating >= 5 and not (baseline_tags & negative_tags):
+        normalized_tags = [tag for tag in normalized_tags if tag not in negative_tags]
+        if "positive_compliment" not in normalized_tags:
+            normalized_tags.append("positive_compliment")
+        normalized_risk_flags = []
+        normalized["sentiment"] = "positive"
+        normalized["issue_category"] = "positive_compliment"
+        normalized["severity_level"] = "low"
+        normalized["reason_summary"] = "positive compliment"
+        normalized["analysis_summary"] = "Positive review with clear praise and low operational risk."
+    elif rating == 4 and not (baseline_tags & negative_tags):
+        normalized_tags = [tag for tag in normalized_tags if tag not in negative_tags]
+        if "positive_compliment" not in normalized_tags:
+            normalized_tags.append("positive_compliment")
+        if set(normalized_tags).issubset(positive_only_tags):
+            normalized["sentiment"] = "positive"
+            normalized["issue_category"] = "positive_compliment"
+            normalized["severity_level"] = "low"
+            normalized["reason_summary"] = "positive compliment"
+            normalized["analysis_summary"] = "Positive review with clear praise and low operational risk."
+
+    if rating <= 3:
+        normalized["issue_category"] = baseline["issue_category"]
+        normalized["severity_level"] = baseline["severity_level"]
+        normalized["analysis_summary"] = baseline["analysis_summary"]
+
+    normalized["issue_tags"] = normalized_tags
+    normalized["risk_flags"] = normalized_risk_flags
+    return normalized
+
+
+def normalize_generated_bundle(review_text: str, rating: int, bundle: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(bundle)
+    normalized.update(
+        sanitize_review_signals(
+            review_text,
+            rating,
+            issue_tags=normalized.get("issue_tags"),
+            risk_flags=normalized.get("risk_flags"),
+            sentiment=normalized.get("sentiment"),
+            reason_summary=normalized.get("reason_summary"),
+            issue_category=normalized.get("issue_category"),
+            severity_level=normalized.get("severity_level"),
+            analysis_summary=normalized.get("analysis_summary"),
+            confidence_note=normalized.get("confidence_note"),
+        )
+    )
+    return normalized
 
 
 def fallback_reply(rating: int, tone_mode: str = "gentle_professional") -> str:
     if rating >= 4:
         if tone_mode == "warm_hospitality":
             return (
-                "Thank you so much for dining with us and for sharing your kind feedback. "
-                "We are grateful for your support and look forward to welcoming you back soon."
+                "Thank you so much for spending time with us and for sharing such kind feedback. "
+                "We are really glad you had a good visit, and we would love to welcome you back again soon."
             )
         if tone_mode == "premium_brand":
             return (
-                "Thank you for your thoughtful review. We truly appreciate your support and "
-                "look forward to serving you again for another excellent experience."
+                "Thank you for your thoughtful review. We truly appreciate your support and are delighted to know the visit left a strong impression. "
+                "We look forward to welcoming you back again soon."
             )
         return (
-            "Thank you for your kind review. We truly appreciate your support and look forward "
-            "to welcoming you back again soon."
+            "Thank you so much for your kind review. We are very happy to hear you enjoyed your visit, "
+            "and we look forward to welcoming you back again soon."
+        )
+
+    if rating == 3:
+        return (
+            "Thank you for taking the time to share your feedback. We appreciate hearing about your visit "
+            "and will use your comments to keep improving both the food and the service experience."
         )
 
     if tone_mode == "warm_hospitality":
         return (
-            "Thank you for sharing your feedback. We are sorry to hear your visit did not meet "
-            "expectations, and we would appreciate the chance to learn more and follow up directly."
+            "Thank you for sharing your feedback with us. We are sorry to hear your visit did not feel as it should have, "
+            "and we would appreciate the chance to learn more and follow up directly."
         )
     if tone_mode == "premium_brand":
         return (
@@ -162,7 +281,10 @@ def _build_user_prompt(
         "- issue_tags: array of short tags\n"
         "- risk_flags: array of short tags\n"
         "- confidence_note: one short sentence\n"
-        "- reason_summary: a short phrase that describes the main issue or compliment"
+        "- reason_summary: a short phrase that describes the main issue or compliment\n"
+        "- issue_category: one of food | service | wait_time | cleanliness | pricing | staff_attitude | no_text_rating_only | positive_compliment | mixed_sentiment | general_feedback\n"
+        "- severity_level: low | medium | high\n"
+        "- analysis_summary: one short operational summary sentence"
     )
 
 
@@ -214,12 +336,15 @@ async def generate_reply_bundle(
                 "risk_flags": parsed.get("risk_flags") or bundle["risk_flags"],
                 "confidence_note": parsed.get("confidence_note") or bundle["confidence_note"],
                 "reason_summary": parsed.get("reason_summary") or bundle["reason_summary"],
+                "issue_category": parsed.get("issue_category") or bundle["issue_category"],
+                "severity_level": parsed.get("severity_level") or bundle["severity_level"],
+                "analysis_summary": parsed.get("analysis_summary") or bundle["analysis_summary"],
             }
         )
     except Exception as exc:
         logger.error("OpenAI structured reply generation failed, using fallback: %s", exc)
 
-    return bundle
+    return normalize_generated_bundle(review_text, rating, bundle)
 
 
 def generate_reply_bundle_sync(
@@ -270,12 +395,15 @@ def generate_reply_bundle_sync(
                 "risk_flags": parsed.get("risk_flags") or bundle["risk_flags"],
                 "confidence_note": parsed.get("confidence_note") or bundle["confidence_note"],
                 "reason_summary": parsed.get("reason_summary") or bundle["reason_summary"],
+                "issue_category": parsed.get("issue_category") or bundle["issue_category"],
+                "severity_level": parsed.get("severity_level") or bundle["severity_level"],
+                "analysis_summary": parsed.get("analysis_summary") or bundle["analysis_summary"],
             }
         )
     except Exception as exc:
         logger.error("OpenAI structured reply generation failed, using fallback: %s", exc)
 
-    return bundle
+    return normalize_generated_bundle(review_text, rating, bundle)
 
 
 async def generate_reply(

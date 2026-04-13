@@ -16,6 +16,11 @@ class Review(Base):
         Index("idx_reviews_fetched_at", "fetched_at"),
         Index("idx_reviews_date_platform", "review_date", "platform"),
         Index("idx_reviews_owner_reply", "has_owner_reply"),
+        Index("idx_reviews_workflow_status", "workflow_status"),
+        Index("idx_reviews_auto_reply_eligible", "auto_reply_eligible"),
+        Index("idx_reviews_auto_reply_risk_level", "auto_reply_risk_level"),
+        Index("idx_reviews_flagged", "is_flagged"),
+        Index("idx_reviews_severity_level", "severity_level"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -41,6 +46,20 @@ class Review(Base):
     is_handled: Mapped[bool] = mapped_column(Boolean, default=False)
     handled_at: Mapped[datetime | None] = mapped_column()
     handled_by: Mapped[str | None] = mapped_column(String(64))
+    workflow_status: Mapped[str] = mapped_column(String(32), default="unreplied")
+    auto_reply_eligible: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_reply_decision_reason: Mapped[str | None] = mapped_column(Text)
+    auto_reply_risk_level: Mapped[str | None] = mapped_column(String(16))
+    escalated: Mapped[bool] = mapped_column(Boolean, default=False)
+    escalation_reason: Mapped[str | None] = mapped_column(Text)
+    is_flagged: Mapped[bool] = mapped_column(Boolean, default=False)
+    issue_category: Mapped[str | None] = mapped_column(String(32))
+    severity_level: Mapped[str | None] = mapped_column(String(16))
+    analysis_summary: Mapped[str | None] = mapped_column(Text)
+    gm_report_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    posted_by_mode: Mapped[str | None] = mapped_column(String(16))
+    policy_version: Mapped[str | None] = mapped_column(String(32))
+    last_auto_decision_at: Mapped[datetime | None] = mapped_column()
     fetched_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 

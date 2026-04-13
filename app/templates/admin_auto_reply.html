@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Auto Reply Config - START{% endblock %}
+{% block shell_title %}Auto-reply policy controls for safe rollout.{% endblock %}
+{% block shell_subtitle %}Phase 1 keeps manual approval in place while policy decisions, risk thresholds, and store-level overrides stay visible and auditable.{% endblock %}
+{% block content %}
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Global Policy</p>
+                <h2>System-wide auto-reply rules</h2>
+                <p class="section-copy">These settings drive the decision engine. Auto-post remains controlled separately from eligibility.</p>
+            </div>
+        </div>
+        <form class="settings-grid" onsubmit="saveGlobalAutoReplyConfig(event)">
+            <label><span>Auto reply enabled</span><input type="checkbox" name="auto_reply_enabled" {% if global_config.auto_reply_enabled %}checked{% endif %}></label>
+            <label><span>Auto-post phase enabled</span><input type="checkbox" name="auto_post_phase_enabled" {% if global_config.auto_post_phase_enabled %}checked{% endif %}></label>
+            <label><span>Google enabled</span><input type="checkbox" name="auto_reply_google_enabled" {% if global_config.auto_reply_google_enabled %}checked{% endif %}></label>
+            <label><span>Yelp enabled</span><input type="checkbox" name="auto_reply_yelp_enabled" {% if global_config.auto_reply_yelp_enabled %}checked{% endif %}></label>
+            <label><span>Minimum rating</span><input type="number" min="1" max="5" name="auto_reply_min_rating" value="{{ global_config.auto_reply_min_rating }}"></label>
+            <label><span>Daily limit</span><input type="number" min="1" max="500" name="auto_reply_daily_limit" value="{{ global_config.auto_reply_daily_limit }}"></label>
+            <label><span>Quiet hours start</span><input type="time" name="auto_reply_quiet_hours_start" value="{{ global_config.auto_reply_quiet_hours_start }}"></label>
+            <label><span>Quiet hours end</span><input type="time" name="auto_reply_quiet_hours_end" value="{{ global_config.auto_reply_quiet_hours_end }}"></label>
+            <label><span>Confidence threshold</span><input type="number" min="0" max="1" step="0.05" name="auto_reply_confidence_threshold" value="{{ global_config.auto_reply_confidence_threshold }}"></label>
+            <label><span>Brand tone</span>
+                <select name="brand_tone_mode">
+                    <option value="gentle_professional" {% if global_config.brand_tone_mode == 'gentle_professional' %}selected{% endif %}>Gentle professional</option>
+                    <option value="warm_hospitality" {% if global_config.brand_tone_mode == 'warm_hospitality' %}selected{% endif %}>Warm hospitality</option>
+                    <option value="premium_brand" {% if global_config.brand_tone_mode == 'premium_brand' %}selected{% endif %}>Premium brand</option>
+                </select>
+            </label>
+            <label class="wide"><span>Blocked keywords</span><textarea name="auto_reply_blocked_keywords" rows="3">{{ (global_config.auto_reply_blocked_keywords or [])|join(', ') }}</textarea></label>
+            <label class="wide"><span>Escalation emails</span><textarea name="auto_reply_escalation_emails" rows="2">{{ (global_config.auto_reply_escalation_emails or [])|join(', ') }}</textarea></label>
+            <div class="filter-submit">
+                <button type="submit" class="btn">Save global policy</button>
+            </div>
+        </form>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Store Overrides</p>
+                <h2>Per-location rules</h2>
+                <p class="section-copy">Use overrides only when a store needs a stricter threshold, different tone, or local escalation list.</p>
+            </div>
+        </div>
+        <div class="history-list">
+            {% for location in locations %}
+            <article class="history-card">
+                <div class="history-head">
+                    <strong>{{ location.name }}</strong>
+                    <span class="text-muted">{{ location.slug }}</span>
+                </div>
+                <form class="settings-grid compact" onsubmit="saveLocationAutoReplyConfig(event, {{ location.id }})">
+                    <label><span>Enabled</span><input type="checkbox" name="auto_reply_enabled" {% if (location.auto_reply_settings or {}).get('auto_reply_enabled') %}checked{% endif %}></label>
+                    <label><span>Min rating</span><input type="number" min="1" max="5" name="auto_reply_min_rating" value="{{ (location.auto_reply_settings or {}).get('auto_reply_min_rating', '') }}"></label>
+                    <label><span>Daily limit</span><input type="number" min="1" max="500" name="auto_reply_daily_limit" value="{{ (location.auto_reply_settings or {}).get('auto_reply_daily_limit', '') }}"></label>
+                    <label><span>Tone</span>
+                        <select name="brand_tone_mode">
+                            <option value="">Use global</option>
+                            <option value="gentle_professional" {% if (location.auto_reply_settings or {}).get('brand_tone_mode') == 'gentle_professional' %}selected{% endif %}>Gentle professional</option>
+                            <option value="warm_hospitality" {% if (location.auto_reply_settings or {}).get('brand_tone_mode') == 'warm_hospitality' %}selected{% endif %}>Warm hospitality</option>
+                            <option value="premium_brand" {% if (location.auto_reply_settings or {}).get('brand_tone_mode') == 'premium_brand' %}selected{% endif %}>Premium brand</option>
+                        </select>
+                    </label>
+                    <label class="wide"><span>Blocked keywords</span><textarea name="auto_reply_blocked_keywords" rows="2">{{ ((location.auto_reply_settings or {}).get('auto_reply_blocked_keywords') or [])|join(', ') }}</textarea></label>
+                    <label class="wide"><span>Escalation emails</span><textarea name="auto_reply_escalation_emails" rows="2">{{ ((location.auto_reply_settings or {}).get('auto_reply_escalation_emails') or [])|join(', ') }}</textarea></label>
+                    <div class="filter-submit">
+                        <button type="submit" class="btn btn-secondary">Save {{ location.name }}</button>
+                    </div>
+                </form>
+            </article>
+            {% else %}
+            <p class="empty-state">No locations available.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Reports - START{% endblock %}
+{% block shell_title %}Reports workspace{% endblock %}
+{% block shell_subtitle %}Turn review analysis into a management-ready summary without leaving the AI operations tool.{% endblock %}
+{% block content %}
+<section class="workspace-section">
+    <div class="panel ai-summary-hero">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Daily Negative Review Report</p>
+                <h2>{{ report.total_reviews }} low-rated reviews in scope for {{ report.report_date }}</h2>
+                <p class="section-copy">Use this summary to brief GM on store performance, issue mix, and the most serious customer concerns.</p>
+            </div>
+            <div class="section-actions">
+                <button class="btn btn-secondary" onclick="sendDailyNegativeReport()">Send GM Report</button>
+                <a href="/audit" class="btn btn-secondary">Open Audit</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">By Store</p>
+                <h2>Store-level breakdown</h2>
+            </div>
+        </div>
+        <div class="ai-context-list">
+            {% for item in report.by_store %}
+            <article class="ai-context-row"><span>{{ item.store }}</span><strong>{{ item.count }}</strong></article>
+            {% else %}
+            <p class="empty-state">No store data in today's report.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">By Issue Type</p>
+                <h2>Operational themes</h2>
+            </div>
+        </div>
+        <div class="ai-context-list">
+            {% for item in report.by_issue_type %}
+            <article class="ai-context-row"><span>{{ item.issue_type.replace('_', ' ') }}</span><strong>{{ item.count }}</strong></article>
+            {% else %}
+            <p class="empty-state">No issue-type data in today's report.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Serious Issues</p>
+                <h2>High-severity reviews to escalate</h2>
+            </div>
+        </div>
+        <div class="history-list">
+            {% for item in report.serious_issues %}
+            <article class="history-card">
+                <div class="history-head">
+                    <strong>{{ item.store }}</strong>
+                    <span class="status status-failed">{{ item.severity }}</span>
+                </div>
+                <p>{{ item.summary }}</p>
+            </article>
+            {% else %}
+            <p class="empty-state">No serious issues in the current report.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Suggested Actions</p>
+                <h2>Recommended next moves</h2>
+            </div>
+        </div>
+        <div class="history-list">
+            {% for action in report.suggested_actions %}
+            <article class="history-card">
+                <p>{{ action }}</p>
+            </article>
+            {% else %}
+            <p class="empty-state">No suggested actions yet.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

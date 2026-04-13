@@ -9,7 +9,7 @@ from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
@@ -19,7 +19,18 @@ from app.config import settings
 from app.database import get_db
 from app.models import Job, Location, Reply, ReplySuggestion, Review, ReviewSource
 from app.services.ai_reply import generate_reply_bundle
+from app.services.auto_reply_refresh import apply_auto_reply_decision_async, reevaluate_reviews_for_sources
+from app.services.auto_reply_policy import (
+    count_auto_posts_today,
+    evaluate_auto_reply,
+    latest_suggestion_for_review,
+    load_effective_auto_reply_config,
+    load_global_auto_reply_config,
+    save_global_auto_reply_config,
+)
 from app.services.review_ops import ReviewFilters, apply_review_filters, count_reviews, derive_review_status
+from app.services.email_alert import send_daily_negative_review_report as send_daily_negative_review_email
+from app.services.gm_report import build_daily_negative_review_report
 from app.services.session_resolution import (
     build_shared_key,
     effective_source_url,
@@ -28,6 +39,7 @@ from app.services.session_resolution import (
     normalize_share_scope,
     resolve_auth_session_for_source,
 )
+from app.services.source_groups import propagate_group_resolved_url
 from app.services.review_views import count_review_listing, fetch_review_listing
 from app.workers.fetch_worker import fetch_all_reviews
 
@@ -39,6 +51,10 @@ class BulkReviewAction(BaseModel):
     review_ids: list[int]
     tone_mode: str | None = None
     handled_by: str | None = "operator"
+
+
+class BulkAutoReplyStartPayload(BaseModel):
+    review_ids: list[int]
 
 
 class SourceUpdatePayload(BaseModel):
@@ -60,6 +76,27 @@ class AuthSessionPayload(BaseModel):
     source_url_override: str | None = None
 
 
+class AutoReplyConfigPayload(BaseModel):
+    auto_reply_enabled: bool | None = None
+    auto_post_phase_enabled: bool | None = None
+    auto_reply_google_enabled: bool | None = None
+    auto_reply_yelp_enabled: bool | None = None
+    auto_reply_min_rating: int | None = None
+    auto_reply_daily_limit: int | None = None
+    auto_reply_quiet_hours_start: str | None = None
+    auto_reply_quiet_hours_end: str | None = None
+    auto_reply_confidence_threshold: float | None = None
+    auto_reply_blocked_keywords: list[str] | None = None
+    auto_reply_escalation_emails: list[str] | None = None
+    brand_tone_mode: str | None = None
+    max_auto_post_failures: int | None = None
+
+
+def _direct_source_posting_available(*, platform: str | None) -> bool:
+    """Return True only when direct source-portal posting is actually implemented."""
+    return (platform or "").strip().lower() == "google"
+
+
 def _optional_int(value: str | None) -> int | None:
     if value is None:
         return None
@@ -72,6 +109,31 @@ def _optional_date(value: str | None) -> date | None:
         return None
     value = value.strip()
     return date.fromisoformat(value) if value else None
+
+
+def _parse_rating_values(raw_values: list[str] | None, fallback: str | None = None) -> list[int] | None:
+    values = list(raw_values or [])
+    if fallback is not None:
+        values.append(fallback)
+
+    ratings: list[int] = []
+    seen: set[int] = set()
+    for raw in values:
+        if raw is None:
+            continue
+        for piece in str(raw).split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            try:
+                rating = int(piece)
+            except ValueError:
+                continue
+            if rating < 1 or rating > 5 or rating in seen:
+                continue
+            seen.add(rating)
+            ratings.append(rating)
+    return ratings or None
 
 
 def _repo_path(value: str) -> Path:
@@ -116,6 +178,202 @@ async def _store_session_for_sources(
     return auth_session, updated_source_ids
 
 
+async def _ensure_unique_job(
+    db: AsyncSession,
+    *,
+    review_id: int,
+    location_id: int,
+    source_id: int | None,
+    job_type: str,
+    payload: dict | None = None,
+) -> Job:
+    existing = (
+        await db.execute(
+            select(Job).where(
+                Job.review_id == review_id,
+                Job.job_type == job_type,
+                Job.status.in_(["queued", "processing"]),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return existing
+
+    job = Job(
+        job_type=job_type,
+        review_id=review_id,
+        location_id=location_id,
+        source_id=source_id,
+        status="queued",
+        payload=payload,
+    )
+    db.add(job)
+    await db.flush()
+    return job
+
+
+async def _apply_auto_reply_decision(db: AsyncSession, *, review: Review, reply: Reply) -> dict:
+    decision = await apply_auto_reply_decision_async(db, review=review, reply=reply)
+
+    if decision.escalation_required:
+        await _ensure_unique_job(
+            db,
+            review_id=review.id,
+            location_id=review.location_id,
+            source_id=review.source_id,
+            job_type="escalate_review",
+            payload={"reply_id": reply.id, "decision_reason": decision.decision_reason},
+        )
+
+    return decision.as_dict()
+
+
+async def _queue_ui_posting_job(
+    db: AsyncSession,
+    *,
+    review: Review,
+    reply: Reply,
+    location: Location | None,
+) -> Job:
+    config = await load_effective_auto_reply_config(db, location=location)
+    if not config.get("auto_post_phase_enabled", False):
+        raise HTTPException(409, "Auto-post phase is not enabled in this environment")
+    if settings.dry_run:
+        raise HTTPException(409, "DRY_RUN is enabled. Turn off dry run before live auto posting.")
+    if not review.auto_reply_eligible:
+        raise HTTPException(409, "Review is not auto-post eligible")
+    if not _direct_source_posting_available(platform=review.platform):
+        raise HTTPException(
+            409,
+            f"Direct posting to {review.platform.title()} is not live yet. START can approve and copy the draft, but staff still need to post it manually on the source page.",
+        )
+
+    return await _ensure_unique_job(
+        db,
+        review_id=review.id,
+        location_id=review.location_id,
+        source_id=review.source_id,
+        job_type="post_ui_reply",
+        payload={"reply_id": reply.id, "mode": "ui_fallback"},
+    )
+
+
+def _apply_review_audit(review: Review, bundle: dict) -> None:
+    is_flagged = bool(review.rating <= 3)
+    review.is_flagged = is_flagged
+    review.issue_category = bundle.get("issue_category")
+    review.severity_level = bundle.get("severity_level")
+    review.analysis_summary = bundle.get("analysis_summary")
+    if not is_flagged:
+        review.gm_report_sent = False
+
+
+async def _build_bulk_auto_reply_preview(
+    db: AsyncSession,
+    *,
+    review_ids: list[int],
+) -> dict:
+    selected_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for review_id in review_ids:
+        if review_id in seen_ids:
+            continue
+        selected_ids.append(review_id)
+        seen_ids.add(review_id)
+
+    eligible_reviews: list[dict] = []
+    blocked_reviews: list[dict] = []
+    for review_id in selected_ids:
+        review = await db.get(Review, review_id)
+        if not review:
+            blocked_reviews.append({"review_id": review_id, "reason": "Review not found."})
+            continue
+
+        location = await db.get(Location, review.location_id)
+        source = await db.get(ReviewSource, review.source_id) if review.source_id else None
+        reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
+        suggestion = await latest_suggestion_for_review(db, review.id)
+
+        if not reply or not (reply.ai_reply_text or "").strip():
+            blocked_reviews.append(
+                {
+                    "review_id": review.id,
+                    "reviewer_name": review.reviewer_name,
+                    "store": location.name if location else None,
+                    "reason": "No prepared reply is available yet.",
+                }
+            )
+            continue
+
+        if review.has_owner_reply or reply.status == "posted":
+            blocked_reviews.append(
+                {
+                    "review_id": review.id,
+                    "reviewer_name": review.reviewer_name,
+                    "store": location.name if location else None,
+                    "reason": "Owner reply is already visible for this review.",
+                }
+            )
+            continue
+
+        if source and source.session_status in {"reauth_required", "failed", "expired", "blocked"}:
+            blocked_reviews.append(
+                {
+                    "review_id": review.id,
+                    "reviewer_name": review.reviewer_name,
+                    "store": location.name if location else None,
+                    "reason": "Source session needs login before posting can continue.",
+                }
+            )
+            continue
+
+        config = await load_effective_auto_reply_config(db, location=location)
+        auto_posts_today = await count_auto_posts_today(db, location_id=review.location_id)
+        decision = evaluate_auto_reply(
+            review,
+            source=source,
+            config=config,
+            suggestion_sentiment=suggestion.sentiment if suggestion else None,
+            issue_tags=reply.issue_tags or (suggestion.issue_tags if suggestion else None),
+            risk_flags=reply.risk_flags or (suggestion.risk_flags if suggestion else None),
+            confidence_note=reply.confidence_note or (suggestion.confidence_note if suggestion else None),
+            auto_posts_today=auto_posts_today,
+        )
+
+        blocked_reason = None
+        if not decision.allow_auto_post:
+            blocked_reason = decision.decision_reason
+        elif not config.get("auto_post_phase_enabled", False):
+            blocked_reason = "Auto-post phase is disabled in this environment."
+        elif settings.dry_run:
+            blocked_reason = "DRY_RUN is enabled, so live auto reply is blocked."
+        elif not _direct_source_posting_available(platform=review.platform):
+            blocked_reason = f"{review.platform.title()} auto reply is not live yet."
+
+        item = {
+            "review_id": review.id,
+            "reviewer_name": review.reviewer_name,
+            "store": location.name if location else None,
+            "platform": review.platform,
+            "rating": review.rating,
+            "decision_reason": decision.decision_reason,
+            "risk_level": decision.risk_level,
+            "workflow_status": decision.workflow_status,
+        }
+        if blocked_reason:
+            blocked_reviews.append({**item, "reason": blocked_reason})
+        else:
+            eligible_reviews.append(item)
+
+    return {
+        "selected_count": len(selected_ids),
+        "eligible_count": len(eligible_reviews),
+        "blocked_count": len(blocked_reviews),
+        "eligible_reviews": eligible_reviews,
+        "blocked_reviews": blocked_reviews,
+    }
+
+
 @router.get("/health")
 async def health(db: AsyncSession = Depends(get_db)):
     try:
@@ -134,6 +392,19 @@ async def stats(db: AsyncSession = Depends(get_db)):
         "google_unreplied_reviews": await count_reviews(db, platform="google"),
         "yelp_unreplied_reviews": await count_reviews(db, platform="yelp"),
         "negative_reviews_needing_attention": await count_reviews(db, negative_only=True),
+        "negative_reviews_today": (
+            await db.execute(
+                select(func.count()).select_from(Review).where(
+                    Review.rating <= 3,
+                    Review.review_date >= today_start,
+                )
+            )
+        ).scalar()
+        or 0,
+        "escalated_reviews": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "escalated"))
+        ).scalar()
+        or 0,
         "reviews_collected_today": (
             await db.execute(select(func.count()).select_from(Review).where(Review.collected_at >= today_start))
         ).scalar()
@@ -148,11 +419,35 @@ async def stats(db: AsyncSession = Depends(get_db)):
             )
         ).scalar()
         or 0,
+        "auto_post_eligible_today": (
+            await db.execute(
+                select(func.count()).select_from(Review).where(
+                    Review.auto_reply_eligible.is_(True),
+                    Review.last_auto_decision_at >= today_start,
+                )
+            )
+        ).scalar()
+        or 0,
+        "manual_review_required": (
+            await db.execute(
+                select(func.count()).select_from(Review).where(Review.workflow_status == "manual_review_required")
+            )
+        ).scalar()
+        or 0,
+        "escalated_reviews": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "escalated"))
+        ).scalar()
+        or 0,
+        "blocked_auth_reviews": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "blocked_auth"))
+        ).scalar()
+        or 0,
     }
 
 
 @router.get("/reviews")
 async def list_reviews(
+    request: Request,
     location_id: str | None = None,
     platform: str | None = None,
     rating: str | None = None,
@@ -166,13 +461,15 @@ async def list_reviews(
     db: AsyncSession = Depends(get_db),
 ):
     parsed_location_id = _optional_int(location_id)
-    parsed_rating = _optional_int(rating)
+    parsed_ratings = _parse_rating_values(request.query_params.getlist("ratings"), rating)
+    parsed_rating = parsed_ratings[0] if parsed_ratings and len(parsed_ratings) == 1 else None
     parsed_date_from = _optional_date(date_from)
     parsed_date_to = _optional_date(date_to)
     filters = ReviewFilters(
         location_id=parsed_location_id,
         platform=platform,
         rating=parsed_rating,
+        ratings=parsed_ratings,
         status=status,
         date_preset=date_preset,
         date_from=parsed_date_from,
@@ -208,10 +505,22 @@ async def list_reviews(
                 "suggested_ai_reply": suggestion.suggestion_text if suggestion else reply.ai_reply_text if reply else None,
                 "job_source_status": source.session_status if source else None,
                 "review_status": item.status,
+                "workflow_status": review.workflow_status or item.status,
                 "is_handled": review.is_handled,
                 "tone_mode": suggestion.tone_mode if suggestion else reply.tone_mode if reply else None,
                 "reason_summary": suggestion.reason_summary if suggestion else reply.reason_summary if reply else None,
                 "confidence_note": suggestion.confidence_note if suggestion else reply.confidence_note if reply else None,
+                "auto_reply_eligible": review.auto_reply_eligible,
+                "auto_reply_risk_level": review.auto_reply_risk_level,
+                "auto_reply_decision_reason": review.auto_reply_decision_reason,
+                "escalated": review.escalated,
+                "escalation_reason": review.escalation_reason,
+                "is_flagged": review.is_flagged,
+                "issue_category": review.issue_category,
+                "severity_level": review.severity_level,
+                "analysis_summary": review.analysis_summary,
+                "gm_report_sent": review.gm_report_sent,
+                "posted_by_mode": review.posted_by_mode,
             }
         )
 
@@ -236,13 +545,14 @@ async def approve_reply(review_id: int, db: AsyncSession = Depends(get_db)):
         location_id=review.location_id,
         source_id=review.source_id,
         status="queued",
-        payload={"reply_id": reply.id},
+        payload={"reply_id": reply.id, "mode": "operator_assisted"},
     )
     db.add(job)
     reply.status = "approved"
+    review.workflow_status = "approved"
     await db.commit()
 
-    return {"status": "queued", "job_id": job.id}
+    return {"status": "queued", "job_id": job.id, "mode": "operator_assisted"}
 
 
 @router.post("/reviews/{review_id}/suggestions/regenerate")
@@ -284,6 +594,7 @@ async def regenerate_reply(
         created_by="operator",
     )
     db.add(suggestion)
+    _apply_review_audit(review, bundle)
 
     reply = (
         await db.execute(select(Reply).where(Reply.review_id == review.id))
@@ -295,24 +606,38 @@ async def regenerate_reply(
         reply.reason_summary = bundle.get("reason_summary")
         reply.issue_tags = bundle.get("issue_tags")
         reply.risk_flags = bundle.get("risk_flags")
+        reply.decision_snapshot = {
+            **(reply.decision_snapshot or {}),
+            "sentiment": bundle.get("sentiment"),
+            "issue_category": bundle.get("issue_category"),
+            "severity_level": bundle.get("severity_level"),
+            "analysis_summary": bundle.get("analysis_summary"),
+        }
     else:
-        db.add(
-            Reply(
-                review_id=review.id,
-                ai_reply_text=bundle["suggestion_text"],
-                ai_model=settings.openai_model,
-                tone_mode=tone_mode,
-                confidence_note=bundle.get("confidence_note"),
-                reason_summary=bundle.get("reason_summary"),
-                issue_tags=bundle.get("issue_tags"),
-                risk_flags=bundle.get("risk_flags"),
-                status="pending" if review.rating <= 3 else "suggested",
-                is_dry_run=settings.dry_run,
-            )
+        reply = Reply(
+            review_id=review.id,
+            ai_reply_text=bundle["suggestion_text"],
+            ai_model=settings.openai_model,
+            tone_mode=tone_mode,
+            confidence_note=bundle.get("confidence_note"),
+            reason_summary=bundle.get("reason_summary"),
+            issue_tags=bundle.get("issue_tags"),
+            risk_flags=bundle.get("risk_flags"),
+            status="suggested",
+            is_dry_run=settings.dry_run,
+            decision_snapshot={
+                "sentiment": bundle.get("sentiment"),
+                "issue_category": bundle.get("issue_category"),
+                "severity_level": bundle.get("severity_level"),
+                "analysis_summary": bundle.get("analysis_summary"),
+            },
         )
+        db.add(reply)
+        await db.flush()
 
+    decision = await _apply_auto_reply_decision(db, review=review, reply=reply)
     await db.commit()
-    return {"status": "ok", "suggestion_id": suggestion.id}
+    return {"status": "ok", "suggestion_id": suggestion.id, "decision": decision}
 
 
 @router.post("/reviews/bulk/regenerate")
@@ -352,6 +677,7 @@ async def bulk_regenerate_reviews(payload: BulkReviewAction, db: AsyncSession = 
                 created_by=payload.handled_by or "operator",
             )
         )
+        _apply_review_audit(review, bundle)
 
         reply = (
             await db.execute(select(Reply).where(Reply.review_id == review.id))
@@ -363,21 +689,35 @@ async def bulk_regenerate_reviews(payload: BulkReviewAction, db: AsyncSession = 
             reply.reason_summary = bundle.get("reason_summary")
             reply.issue_tags = bundle.get("issue_tags")
             reply.risk_flags = bundle.get("risk_flags")
+            reply.decision_snapshot = {
+                **(reply.decision_snapshot or {}),
+                "sentiment": bundle.get("sentiment"),
+                "issue_category": bundle.get("issue_category"),
+                "severity_level": bundle.get("severity_level"),
+                "analysis_summary": bundle.get("analysis_summary"),
+            }
         else:
-            db.add(
-                Reply(
-                    review_id=review.id,
-                    ai_reply_text=bundle["suggestion_text"],
-                    ai_model=settings.openai_model,
-                    tone_mode=tone_mode,
-                    confidence_note=bundle.get("confidence_note"),
-                    reason_summary=bundle.get("reason_summary"),
-                    issue_tags=bundle.get("issue_tags"),
-                    risk_flags=bundle.get("risk_flags"),
-                    status="pending" if review.rating <= 3 else "suggested",
-                    is_dry_run=settings.dry_run,
-                )
+            reply = Reply(
+                review_id=review.id,
+                ai_reply_text=bundle["suggestion_text"],
+                ai_model=settings.openai_model,
+                tone_mode=tone_mode,
+                confidence_note=bundle.get("confidence_note"),
+                reason_summary=bundle.get("reason_summary"),
+                issue_tags=bundle.get("issue_tags"),
+                risk_flags=bundle.get("risk_flags"),
+                status="suggested",
+                is_dry_run=settings.dry_run,
+                decision_snapshot={
+                    "sentiment": bundle.get("sentiment"),
+                    "issue_category": bundle.get("issue_category"),
+                    "severity_level": bundle.get("severity_level"),
+                    "analysis_summary": bundle.get("analysis_summary"),
+                },
             )
+            db.add(reply)
+            await db.flush()
+        await _apply_auto_reply_decision(db, review=review, reply=reply)
         created += 1
 
     await db.commit()
@@ -398,6 +738,105 @@ async def bulk_mark_handled(payload: BulkReviewAction, db: AsyncSession = Depend
         count += 1
     await db.commit()
     return {"status": "ok", "updated_reviews": count}
+
+
+@router.get("/reviews/selection")
+async def select_reviews_for_current_filters(
+    request: Request,
+    location_id: str | None = None,
+    platform: str | None = None,
+    rating: str | None = None,
+    status: str | None = None,
+    date_preset: str | None = "all",
+    date_from: str | None = None,
+    date_to: str | None = None,
+    needs_attention_only: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    parsed_location_id = _optional_int(location_id)
+    parsed_ratings = _parse_rating_values(request.query_params.getlist("ratings"), rating)
+    parsed_rating = parsed_ratings[0] if parsed_ratings and len(parsed_ratings) == 1 else None
+    parsed_date_from = _optional_date(date_from)
+    parsed_date_to = _optional_date(date_to)
+    filters = ReviewFilters(
+        location_id=parsed_location_id,
+        platform=platform,
+        rating=parsed_rating,
+        ratings=parsed_ratings,
+        status=status,
+        date_preset=date_preset,
+        date_from=parsed_date_from,
+        date_to=parsed_date_to,
+        needs_attention_only=needs_attention_only,
+    )
+    query = apply_review_filters(select(Review.id), filters).order_by(
+        Review.review_date.desc().nullslast(),
+        Review.last_seen_at.desc(),
+    )
+    ids = (await db.execute(query)).scalars().all()
+    return {"review_ids": ids, "count": len(ids)}
+
+
+@router.post("/reviews/bulk/auto-reply-preview")
+async def bulk_auto_reply_preview(payload: BulkAutoReplyStartPayload, db: AsyncSession = Depends(get_db)):
+    if not payload.review_ids:
+        raise HTTPException(400, "No reviews selected")
+    return await _build_bulk_auto_reply_preview(db, review_ids=payload.review_ids)
+
+
+async def _bulk_auto_reply_ui(payload: BulkAutoReplyStartPayload, db: AsyncSession) -> dict:
+    if not payload.review_ids:
+        raise HTTPException(400, "No reviews selected")
+
+    preview = await _build_bulk_auto_reply_preview(db, review_ids=payload.review_ids)
+    queued_jobs: list[dict] = []
+    blocked_reviews = list(preview["blocked_reviews"])
+
+    for item in preview["eligible_reviews"]:
+        review = await db.get(Review, item["review_id"])
+        if not review:
+            blocked_reviews.append({"review_id": item["review_id"], "reason": "Review not found while queueing."})
+            continue
+        reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
+        if not reply:
+            blocked_reviews.append({"review_id": review.id, "reason": "Prepared reply missing while queueing."})
+            continue
+        location = await db.get(Location, review.location_id)
+        try:
+            job = await _queue_ui_posting_job(db, review=review, reply=reply, location=location)
+        except HTTPException as exc:
+            blocked_reviews.append(
+                {
+                    "review_id": review.id,
+                    "reviewer_name": review.reviewer_name,
+                    "store": location.name if location else None,
+                    "reason": exc.detail,
+                }
+            )
+            continue
+        queued_jobs.append({"review_id": review.id, "job_id": job.id})
+
+    await db.commit()
+    return {
+        "status": "queued",
+        "selected_count": preview["selected_count"],
+        "eligible_count": len(preview["eligible_reviews"]),
+        "queued_count": len(queued_jobs),
+        "blocked_count": len(blocked_reviews),
+        "queued_jobs": queued_jobs,
+        "blocked_reviews": blocked_reviews,
+        "mode": "ui_fallback",
+    }
+
+
+@router.post("/reviews/bulk/auto-reply-start")
+async def bulk_auto_reply_start(payload: BulkAutoReplyStartPayload, db: AsyncSession = Depends(get_db)):
+    return await _bulk_auto_reply_ui(payload, db)
+
+
+@router.post("/reviews/bulk/auto-reply-ui")
+async def bulk_auto_reply_ui(payload: BulkAutoReplyStartPayload, db: AsyncSession = Depends(get_db)):
+    return await _bulk_auto_reply_ui(payload, db)
 
 
 @router.get("/reviews/export/selected.csv")
@@ -496,12 +935,27 @@ async def get_review(review_id: int, db: AsyncSession = Depends(get_db)):
         "detected_owner_reply_text": review.detected_owner_reply_text,
         "detected_owner_reply_at": review.detected_owner_reply_at.isoformat() if review.detected_owner_reply_at else None,
         "is_handled": review.is_handled,
+        "workflow_status": review.workflow_status,
+        "auto_reply_eligible": review.auto_reply_eligible,
+        "auto_reply_decision_reason": review.auto_reply_decision_reason,
+        "auto_reply_risk_level": review.auto_reply_risk_level,
+        "escalated": review.escalated,
+        "escalation_reason": review.escalation_reason,
+        "is_flagged": review.is_flagged,
+        "issue_category": review.issue_category,
+        "severity_level": review.severity_level,
+        "analysis_summary": review.analysis_summary,
+        "gm_report_sent": review.gm_report_sent,
+        "posted_by_mode": review.posted_by_mode,
+        "policy_version": review.policy_version,
+        "last_auto_decision_at": review.last_auto_decision_at.isoformat() if review.last_auto_decision_at else None,
         "handled_at": review.handled_at.isoformat() if review.handled_at else None,
         "handled_by": review.handled_by,
         "source": {
             "id": source.id,
             "label": source.source_label,
             "url": source.source_url,
+            "resolved_url": source.resolved_source_url,
             "auth_mode": source.auth_mode,
             "session_status": source.session_status,
         }
@@ -518,8 +972,12 @@ async def get_review(review_id: int, db: AsyncSession = Depends(get_db)):
             "reason_summary": reply.reason_summary,
             "issue_tags": reply.issue_tags,
             "risk_flags": reply.risk_flags,
+            "decision_snapshot": reply.decision_snapshot,
             "is_dry_run": reply.is_dry_run,
             "posted_at": reply.posted_at.isoformat() if reply.posted_at else None,
+            "posted_by_mode": reply.posted_by_mode,
+            "last_auto_post_error": reply.last_auto_post_error,
+            "last_auto_post_at": reply.last_auto_post_at.isoformat() if reply.last_auto_post_at else None,
         }
         if reply
         else None,
@@ -565,9 +1023,240 @@ async def list_locations(db: AsyncSession = Depends(get_db)):
             "city": location.city,
             "state": location.state,
             "is_active": location.is_active,
+            "auto_reply_settings": location.auto_reply_settings or {},
         }
         for location in locations
     ]
+
+
+@router.post("/reviews/{review_id}/evaluate-auto-reply")
+async def evaluate_auto_reply_for_review(review_id: int, db: AsyncSession = Depends(get_db)):
+    review = await db.get(Review, review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+    reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
+    if not reply:
+        raise HTTPException(404, "No reply found for this review")
+
+    decision = await _apply_auto_reply_decision(db, review=review, reply=reply)
+    await db.commit()
+    return {"status": "ok", "decision": decision}
+
+
+@router.post("/reviews/bulk/evaluate-auto-reply")
+async def bulk_evaluate_auto_reply(payload: BulkReviewAction, db: AsyncSession = Depends(get_db)):
+    updated = 0
+    decisions: list[dict] = []
+    for review_id in payload.review_ids:
+        review = await db.get(Review, review_id)
+        if not review:
+            continue
+        reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
+        if not reply:
+            continue
+        decision = await _apply_auto_reply_decision(db, review=review, reply=reply)
+        decisions.append({"review_id": review.id, "decision": decision})
+        updated += 1
+    await db.commit()
+    return {"status": "ok", "updated_reviews": updated, "decisions": decisions}
+
+
+@router.post("/reviews/{review_id}/mark-escalated")
+async def mark_review_escalated(review_id: int, db: AsyncSession = Depends(get_db)):
+    review = await db.get(Review, review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+    review.workflow_status = "escalated"
+    review.escalated = True
+    review.escalation_reason = review.escalation_reason or "Escalated by operator."
+    review.last_auto_decision_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "ok", "workflow_status": review.workflow_status}
+
+
+@router.post("/reviews/{review_id}/mark-manual")
+async def mark_review_manual(review_id: int, db: AsyncSession = Depends(get_db)):
+    review = await db.get(Review, review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+    review.workflow_status = "manual_review_required"
+    review.auto_reply_eligible = False
+    review.escalated = False
+    review.last_auto_decision_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "ok", "workflow_status": review.workflow_status}
+
+
+async def _queue_single_auto_reply_ui(review_id: int, db: AsyncSession) -> dict:
+    review = await db.get(Review, review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+    reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
+    if not reply:
+        raise HTTPException(404, "No reply found for this review")
+
+    location = await db.get(Location, review.location_id)
+    job = await _queue_ui_posting_job(db, review=review, reply=reply, location=location)
+    await db.commit()
+    return {"status": "queued", "job_id": job.id, "mode": "ui_fallback"}
+
+
+@router.post("/reviews/{review_id}/retry-auto-post")
+async def retry_auto_post(review_id: int, db: AsyncSession = Depends(get_db)):
+    return await _queue_single_auto_reply_ui(review_id, db)
+
+
+@router.post("/reviews/{review_id}/auto-reply-ui")
+async def auto_reply_ui(review_id: int, db: AsyncSession = Depends(get_db)):
+    return await _queue_single_auto_reply_ui(review_id, db)
+
+
+@router.get("/admin/auto-reply-config")
+async def get_auto_reply_config(db: AsyncSession = Depends(get_db)):
+    return await load_global_auto_reply_config(db)
+
+
+@router.patch("/admin/auto-reply-config")
+async def patch_auto_reply_config(payload: AutoReplyConfigPayload, db: AsyncSession = Depends(get_db)):
+    current = await load_global_auto_reply_config(db)
+    current.update(payload.model_dump(exclude_unset=True))
+    config = await save_global_auto_reply_config(db, current)
+    await db.commit()
+    return {"status": "ok", "config": config}
+
+
+@router.patch("/locations/{location_id}/auto-reply-config")
+async def patch_location_auto_reply_config(
+    location_id: int,
+    payload: AutoReplyConfigPayload,
+    db: AsyncSession = Depends(get_db),
+):
+    location = await db.get(Location, location_id)
+    if not location:
+        raise HTTPException(404, "Location not found")
+    merged = dict(location.auto_reply_settings or {})
+    merged.update(payload.model_dump(exclude_unset=True))
+    location.auto_reply_settings = merged
+    await db.commit()
+    return {"status": "ok", "location_id": location.id, "config": location.auto_reply_settings}
+
+
+@router.get("/auto-reply/stats")
+async def auto_reply_stats(db: AsyncSession = Depends(get_db)):
+    return {
+        "auto_post_eligible": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "auto_post_eligible"))
+        ).scalar()
+        or 0,
+        "manual_review_required": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "manual_review_required"))
+        ).scalar()
+        or 0,
+        "escalated": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "escalated"))
+        ).scalar()
+        or 0,
+        "blocked_auth": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "blocked_auth"))
+        ).scalar()
+        or 0,
+        "posted_automatically": (
+            await db.execute(select(func.count()).select_from(Reply).where(Reply.posted_by_mode == "auto"))
+        ).scalar()
+        or 0,
+        "flagged_reviews": (
+            await db.execute(select(func.count()).select_from(Review).where(Review.is_flagged.is_(True)))
+        ).scalar()
+        or 0,
+        "negative_reviews_today": (
+            await db.execute(
+                select(func.count()).select_from(Review).where(
+                    Review.rating <= 3,
+                    Review.review_date >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),
+                )
+            )
+        ).scalar()
+        or 0,
+    }
+
+
+@router.get("/auto-reply/failures")
+async def auto_reply_failures(limit: int = 25, db: AsyncSession = Depends(get_db)):
+    replies = (
+        await db.execute(
+            select(Reply)
+            .where(Reply.last_auto_post_error.is_not(None))
+            .order_by(Reply.updated_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "review_id": reply.review_id,
+            "reply_id": reply.id,
+            "auto_post_attempts": reply.auto_post_attempts,
+            "last_auto_post_error": reply.last_auto_post_error,
+            "last_auto_post_at": reply.last_auto_post_at.isoformat() if reply.last_auto_post_at else None,
+        }
+        for reply in replies
+    ]
+
+
+@router.get("/auto-reply/escalations")
+async def auto_reply_escalations(limit: int = 25, db: AsyncSession = Depends(get_db)):
+    reviews = (
+        await db.execute(
+            select(Review)
+            .where(Review.workflow_status == "escalated")
+            .order_by(Review.last_auto_decision_at.desc().nullslast(), Review.id.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "review_id": review.id,
+            "location_id": review.location_id,
+            "platform": review.platform,
+            "reviewer_name": review.reviewer_name,
+            "rating": review.rating,
+            "decision_reason": review.auto_reply_decision_reason,
+            "escalation_reason": review.escalation_reason,
+            "last_auto_decision_at": review.last_auto_decision_at.isoformat() if review.last_auto_decision_at else None,
+        }
+        for review in reviews
+    ]
+
+
+@router.get("/auto-reply/reports/daily-negative")
+async def daily_negative_report(db: AsyncSession = Depends(get_db)):
+    report = await build_daily_negative_review_report(db)
+    return {
+        "title": report.title,
+        "report_date": report.report_date,
+        "total_reviews": report.total_reviews,
+        "by_store": report.by_store,
+        "by_issue_type": report.by_issue_type,
+        "serious_issues": report.serious_issues,
+        "suggested_actions": report.suggested_actions,
+        "body": report.body,
+    }
+
+
+@router.post("/auto-reply/reports/daily-negative/send")
+async def send_daily_negative_report(db: AsyncSession = Depends(get_db)):
+    report = await build_daily_negative_review_report(db)
+    recipients: list[str] = []
+    if settings.alert_email_to:
+        recipients.extend([item.strip() for item in settings.alert_email_to.split(",") if item.strip()])
+    sent = send_daily_negative_review_email(report.title, report.body, recipients)
+    if sent:
+        reviews = (
+            await db.execute(select(Review).where(Review.id.in_(report.review_ids)))
+        ).scalars().all() if report.review_ids else []
+        for review in reviews:
+            review.gm_report_sent = True
+        await db.commit()
+    return {"status": "sent" if sent else "failed", "recipient_count": len(recipients), "review_count": report.total_reviews}
 
 
 @router.get("/sources")
@@ -615,11 +1304,23 @@ async def update_source(source_id: int, payload: SourceUpdatePayload, db: AsyncS
     if not source:
         raise HTTPException(404, "Source not found")
 
+    previous_session_status = source.session_status
+    previous_effective_url = source.resolved_source_url or source.source_url
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(source, field, value)
+    should_refresh_decisions = (
+        source.session_status == "active"
+        and (
+            previous_session_status != "active"
+            or (source.resolved_source_url or source.source_url) != previous_effective_url
+        )
+    )
+    refresh_result = {"updated_reviews": 0}
+    if should_refresh_decisions:
+        refresh_result = await reevaluate_reviews_for_sources(db, source_ids=[source.id])
     await db.commit()
-    return {"status": "ok", "source_id": source.id}
+    return {"status": "ok", "source_id": source.id, "reevaluated_reviews": refresh_result["updated_reviews"]}
 
 
 @router.post("/sources/{source_id}/sessions")
@@ -689,9 +1390,15 @@ async def create_source_session(
     )
 
     resolved_source_url_updated = False
+    resolved_source_updated_ids: list[int] = []
     if normalized_source_override:
-        source.resolved_source_url = normalized_source_override
+        resolved_source_updated_ids = await propagate_group_resolved_url(db, source, normalized_source_override)
         resolved_source_url_updated = True
+
+    refresh_result = {"updated_reviews": 0}
+    if payload.status == "active":
+        refresh_ids = list({*updated_source_ids, *resolved_source_updated_ids})
+        refresh_result = await reevaluate_reviews_for_sources(db, source_ids=refresh_ids)
 
     await db.commit()
     return {
@@ -701,7 +1408,9 @@ async def create_source_session(
         "shared_key": resolved_shared_key,
         "updated_source_ids": updated_source_ids,
         "source_url_updated": resolved_source_url_updated,
-        "source_url": source.resolved_source_url if resolved_source_url_updated else None,
+        "source_url": normalized_source_override if resolved_source_url_updated else None,
+        "resolved_source_updated_ids": resolved_source_updated_ids,
+        "reevaluated_reviews": refresh_result["updated_reviews"],
     }
 
 

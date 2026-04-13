@@ -16,3 +16,4 @@ tmp-*.json
 .claude/
 node_modules/
 credentials.json
+yelp-cookies.json

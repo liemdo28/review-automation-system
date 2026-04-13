@@ -26,11 +26,11 @@
 
 <section class="workspace-section workspace-stack">
     {% for item in locations %}
-    <div class="panel store-panel">
+    <div class="panel store-panel store-accent-card" style="{{ store_theme_style(item.loc) }}">
         <div class="store-panel-head">
             <div>
                 <p class="eyebrow">Store {{ loop.index }}</p>
-                <h2>{{ item.loc.name }}</h2>
+                <h2>{{ item.loc.name }} <span class="store-chip" style="{{ store_theme_style(item.loc) }}">{{ store_theme(item.loc).label }}</span></h2>
                 <p class="text-muted">{{ item.loc.address }}</p>
                 <p class="text-muted">{{ item.loc.city }}, {{ item.loc.state }}</p>
             </div>
@@ -61,7 +61,7 @@
             {% set effective_session = source_item.effective_session if source_item.effective_session is defined else none %}
             {% set using_shared_session = source_item.using_shared_session if source_item.using_shared_session is defined else false %}
             {% set effective_source_url = source_item.effective_source_url if source_item.effective_source_url is defined else source.source_url %}
-            <article class="store-source-row">
+            <article class="store-source-row store-accent-subtle" style="{{ store_theme_style(item.loc) }}">
                 <div class="store-source-main">
                     <div class="store-source-top">
                         <div class="store-source-title">

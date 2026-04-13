@@ -13,8 +13,31 @@ from app.database import AsyncSessionLocal
 from app.models import AuthSession, EmailAlert, FetchLog, Job, Location, Reply, ReplySuggestion, Review, ReviewSource
 from app.providers import ProviderAuthRequiredError, ProviderFetchError, get_provider
 from app.services.session_resolution import effective_source_url, resolve_auth_session_for_source
+from app.services.source_groups import (
+    google_source_url_for_location,
+    group_sources_for_fetch,
+    resolve_canonical_source,
+    shared_review_page_key,
+)
 
 logger = logging.getLogger("review_system.fetch_worker")
+
+
+async def _shared_review_group_sources(session, source: ReviewSource) -> list[ReviewSource]:
+    group_key = shared_review_page_key(source)
+    if not group_key:
+        current_source = await session.get(ReviewSource, source.id)
+        return [current_source] if current_source else []
+
+    candidates = (
+        await session.execute(
+            select(ReviewSource).where(
+                ReviewSource.platform == source.platform,
+                ReviewSource.is_active.is_(True),
+            )
+        )
+    ).scalars().all()
+    return [candidate for candidate in candidates if shared_review_page_key(candidate) == group_key]
 
 
 async def fetch_all_reviews(
@@ -36,6 +59,7 @@ async def fetch_all_reviews(
             query = query.where(ReviewSource.id == source_id)
 
         sources = (await session.execute(query.order_by(ReviewSource.location_id, ReviewSource.platform))).scalars().all()
+        sources = await group_sources_for_fetch(session, sources)
 
     processed = 0
     failed = 0
@@ -58,10 +82,17 @@ async def _fetch_source(source_id: int) -> bool:
     async with AsyncSessionLocal() as session:
         source = await session.get(ReviewSource, source_id)
         location = await session.get(Location, source.location_id) if source else None
+        if source and source.platform == "google":
+            source, location = await resolve_canonical_source(session, source, location=location)
+            source_id = source.id
         auth_session = await resolve_auth_session_for_source(session, source, location=location) if source else None
         if not source or not location:
             return False
-        source.effective_source_url = effective_source_url(source, auth_session)
+        source.effective_source_url = (
+            source.resolved_source_url
+            or google_source_url_for_location(location, source)
+            or effective_source_url(source, auth_session)
+        )
 
     try:
         provider = get_provider(source, auth_session=auth_session)
@@ -90,11 +121,11 @@ async def _fetch_source(source_id: int) -> bool:
         async with AsyncSessionLocal() as session:
             new_reviews = await _upsert_reviews(session, source, reviews)
             await _enqueue_new_review_jobs(session, source, reviews)
-            db_source = await session.get(ReviewSource, source_id)
-            if db_source:
-                db_source.session_status = "active"
-                db_source.last_successful_sync_at = datetime.utcnow()
-                db_source.last_error_message = None
+            target_sources = await _shared_review_group_sources(session, source)
+            for target_source in filter(None, target_sources):
+                target_source.session_status = "active"
+                target_source.last_successful_sync_at = datetime.utcnow()
+                target_source.last_error_message = None
             await session.commit()
         return True
 
@@ -155,7 +186,7 @@ async def _mark_source_failure(
     *,
     failed_status: str,
 ) -> None:
-    target_sources = [await session.get(ReviewSource, source.id)]
+    target_sources = await _shared_review_group_sources(session, source)
     if auth_session and auth_session.share_scope == "platform":
         target_sources = (
             await session.execute(

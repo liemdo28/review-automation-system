@@ -51,3 +51,27 @@ def send_low_rating_alert(
     except Exception as e:
         logger.error(f"Failed to send alert email: {e}")
         return False
+
+
+def send_daily_negative_review_report(report_title: str, report_body: str, recipients: list[str]) -> bool:
+    clean_recipients = [item.strip() for item in recipients if item and item.strip()]
+    if not settings.smtp_user or not clean_recipients:
+        logger.warning("SMTP or report recipients not configured, skipping GM report email")
+        return False
+
+    msg = MIMEMultipart()
+    msg["From"] = settings.alert_email_from
+    msg["To"] = ", ".join(clean_recipients)
+    msg["Subject"] = report_title
+    msg.attach(MIMEText(report_body, "plain"))
+
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+        logger.info("Daily negative review report sent to %s", clean_recipients)
+        return True
+    except Exception as exc:
+        logger.error("Failed to send daily negative review report: %s", exc)
+        return False

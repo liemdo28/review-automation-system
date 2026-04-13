@@ -2,6 +2,7 @@ from app.providers.base import (
     ProviderAuthRequiredError,
     ProviderConfigError,
     ProviderFetchError,
+    ProviderPostError,
     ProviderReview,
     ReviewProvider,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "ProviderAuthRequiredError",
     "ProviderConfigError",
     "ProviderFetchError",
+    "ProviderPostError",
     "ProviderReview",
     "ReviewProvider",
     "YelpReviewsProvider",

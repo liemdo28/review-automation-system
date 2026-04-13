@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     yelp_login_url: str = "https://biz.yelp.com/login"
     review_browser_locale: str = "en-US"
     review_browser_timezone: str = "America/Los_Angeles"
+    ui_posting_headless: bool = False
+    ui_posting_artifact_dir: str = ".run/ui-posting"
+    ui_posting_match_threshold: float = 0.78
+    ui_posting_match_margin: float = 0.08
 
     # Email
     smtp_host: str = "smtp.gmail.com"
