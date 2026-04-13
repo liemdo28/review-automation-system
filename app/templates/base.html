@@ -13,10 +13,10 @@
             <span class="nav-title">Restaurant Review Desk</span>
         </div>
         <div class="nav-links">
-            <a href="/" class="nav-link">Dashboard</a>
-            <a href="/reviews" class="nav-link">Needs Attention</a>
-            <a href="/locations" class="nav-link">Locations</a>
-            <a href="/admin/sources" class="nav-link">Admin</a>
+            <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+            <a href="/reviews" class="nav-link {% if request.url.path.startswith('/reviews') %}active{% endif %}">Needs Attention</a>
+            <a href="/locations" class="nav-link {% if request.url.path.startswith('/locations') %}active{% endif %}">Locations</a>
+            <a href="/admin/sources" class="nav-link {% if request.url.path.startswith('/admin') %}active{% endif %}">Admin</a>
         </div>
         <div class="nav-status">
             <span class="status-dot"></span>

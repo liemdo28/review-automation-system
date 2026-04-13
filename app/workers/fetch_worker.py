@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -70,9 +70,9 @@ async def _fetch_source(source_id: int) -> bool:
             if db_source:
                 db_source.session_status = session_status
                 if session_ok:
-                    db_source.last_auth_at = datetime.now(timezone.utc)
+                    db_source.last_auth_at = datetime.utcnow()
                 else:
-                    db_source.last_failed_sync_at = datetime.now(timezone.utc)
+                    db_source.last_failed_sync_at = datetime.utcnow()
             await session.commit()
 
         if not session_ok:
@@ -91,7 +91,7 @@ async def _fetch_source(source_id: int) -> bool:
             db_source = await session.get(ReviewSource, source_id)
             if db_source:
                 db_source.session_status = "active"
-                db_source.last_successful_sync_at = datetime.now(timezone.utc)
+                db_source.last_successful_sync_at = datetime.utcnow()
                 db_source.last_error_message = None
             await session.commit()
         return True
@@ -103,7 +103,7 @@ async def _fetch_source(source_id: int) -> bool:
             db_source = await session.get(ReviewSource, source_id)
             if db_source:
                 db_source.session_status = "reauth_required"
-                db_source.last_failed_sync_at = datetime.now(timezone.utc)
+                db_source.last_failed_sync_at = datetime.utcnow()
                 db_source.last_error_message = error_message
             await session.commit()
         return False
@@ -114,7 +114,7 @@ async def _fetch_source(source_id: int) -> bool:
             db_source = await session.get(ReviewSource, source_id)
             if db_source:
                 db_source.session_status = "failed"
-                db_source.last_failed_sync_at = datetime.now(timezone.utc)
+                db_source.last_failed_sync_at = datetime.utcnow()
                 db_source.last_error_message = error_message
             await session.commit()
         return False
@@ -125,7 +125,7 @@ async def _fetch_source(source_id: int) -> bool:
             db_source = await session.get(ReviewSource, source_id)
             if db_source:
                 db_source.session_status = "failed"
-                db_source.last_failed_sync_at = datetime.now(timezone.utc)
+                db_source.last_failed_sync_at = datetime.utcnow()
                 db_source.last_error_message = error_message
             await session.commit()
         return False
@@ -175,7 +175,7 @@ async def _upsert_reviews(session, source: ReviewSource, reviews) -> int:
         ).scalars()
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     for provider_review in reviews:
         payload = provider_review.raw_payload or {}
         stmt = pg_insert(Review).values(

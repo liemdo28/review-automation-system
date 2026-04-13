@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import csv
-from datetime import date, datetime, timezone
+import subprocess
+from datetime import date, datetime
 from io import StringIO
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,6 +23,7 @@ from app.services.review_ops import ReviewFilters, apply_review_filters, count_r
 from app.workers.fetch_worker import fetch_all_reviews
 
 router = APIRouter(tags=["api"])
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class BulkReviewAction(BaseModel):
@@ -56,6 +59,13 @@ def _optional_date(value: str | None) -> date | None:
         return None
     value = value.strip()
     return date.fromisoformat(value) if value else None
+
+
+def _repo_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return REPO_ROOT / path
 
 
 @router.get("/health")
@@ -342,7 +352,7 @@ async def bulk_regenerate_reviews(payload: BulkReviewAction, db: AsyncSession = 
 
 @router.post("/reviews/bulk/mark-handled")
 async def bulk_mark_handled(payload: BulkReviewAction, db: AsyncSession = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     count = 0
     for review_id in payload.review_ids:
         review = await db.get(Review, review_id)
@@ -410,7 +420,7 @@ async def export_reviews(review_ids: str, db: AsyncSession = Depends(get_db)):
         )
 
     output.seek(0)
-    filename = f"review-export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.csv"
+    filename = f"review-export-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -573,14 +583,67 @@ async def create_source_session(source_id: int, payload: AuthSessionPayload, db:
         platform=source.platform,
         session_reference=payload.session_reference,
         expires_at=payload.expires_at,
-        last_validated_at=datetime.now(timezone.utc),
+        last_validated_at=datetime.utcnow(),
         status=payload.status,
     )
     db.add(auth_session)
     source.session_status = payload.status
-    source.last_auth_at = datetime.now(timezone.utc)
+    source.last_auth_at = datetime.utcnow()
     await db.commit()
     return {"status": "ok", "session_id": auth_session.id}
+
+
+@router.post("/sources/{source_id}/bootstrap")
+async def bootstrap_source_session(source_id: int, db: AsyncSession = Depends(get_db)):
+    source = await db.get(ReviewSource, source_id)
+    if not source:
+        raise HTTPException(404, "Source not found")
+    if not source.source_url:
+        raise HTTPException(400, "Source URL is missing")
+
+    session_dir = _repo_path(settings.session_storage_dir)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_path = session_dir / f"source-{source.id}-{source.platform}.json"
+    script_path = REPO_ROOT / "scripts" / "bootstrap_source_session.ps1"
+    if not script_path.exists():
+        raise HTTPException(500, "Bootstrap script is missing")
+
+    command = [
+        "powershell.exe",
+        "-NoExit",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script_path),
+        "-SourceId",
+        str(source.id),
+        "-Platform",
+        source.platform,
+        "-SourceUrl",
+        source.source_url,
+        "-SourceLabel",
+        source.source_label or f"{source.platform.title()} source",
+        "-OutputPath",
+        str(session_path),
+        "-ApiBaseUrl",
+        "http://127.0.0.1:8000",
+    ]
+
+    creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    try:
+        subprocess.Popen(command, cwd=str(REPO_ROOT), creationflags=creationflags)
+    except OSError as exc:
+        raise HTTPException(500, f"Unable to launch bootstrap window: {exc}") from exc
+
+    source.session_status = "reauth_required"
+    await db.commit()
+    return {
+        "status": "bootstrap_started",
+        "source_id": source.id,
+        "session_path": str(session_path),
+        "platform": source.platform,
+        "source_label": source.source_label,
+    }
 
 
 @router.post("/fetch/trigger")

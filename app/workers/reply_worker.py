@@ -1,12 +1,13 @@
 """rq task functions for reply generation, posting, and email alerts."""
-import logging
-from datetime import datetime, timezone
 
+import logging
+from datetime import datetime
+
+from app.config import settings
 from app.database import SyncSessionLocal
 from app.models import EmailAlert, Job, Location, Reply, ReplySuggestion, Review
 from app.services.ai_reply import generate_reply_bundle_sync
 from app.services.email_alert import send_low_rating_alert
-from app.config import settings
 
 logger = logging.getLogger("review_system.reply_worker")
 
@@ -17,11 +18,11 @@ def task_generate_reply(job_id: int):
     try:
         job = session.get(Job, job_id)
         if not job:
-            logger.error(f"Job {job_id} not found")
+            logger.error("Job %s not found", job_id)
             return
 
         job.status = "processing"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.utcnow()
         session.commit()
 
         review = session.get(Review, job.review_id)
@@ -32,16 +33,14 @@ def task_generate_reply(job_id: int):
             session.commit()
             return
 
-        # Check if reply already exists (idempotency)
         existing = session.query(Reply).filter_by(review_id=review.id).first()
         if existing:
             job.status = "completed"
             job.result = {"reply_id": existing.id, "note": "already exists"}
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.utcnow()
             session.commit()
             return
 
-        # Generate AI reply
         loc_str = f"{location.city}, {location.state}" if location.city else location.address or ""
         tone_mode = (job.payload or {}).get("tone_mode", settings.default_reply_tone)
         reply_bundle = generate_reply_bundle_sync(
@@ -55,7 +54,6 @@ def task_generate_reply(job_id: int):
             tone_mode=tone_mode,
         )
 
-        # Save reply
         reply = Reply(
             review_id=review.id,
             ai_reply_text=reply_bundle["suggestion_text"],
@@ -86,37 +84,39 @@ def task_generate_reply(job_id: int):
             )
         )
 
-        # Route based on platform + rating
         if review.rating <= 3:
-            # High-risk reviews still trigger attention for managers.
-            next_job = Job(
-                job_type="send_alert_email",
-                review_id=review.id,
-                location_id=location.id,
-                source_id=job.source_id,
-                status="queued",
-                payload={"reply_id": reply.id},
+            session.add(
+                Job(
+                    job_type="send_alert_email",
+                    review_id=review.id,
+                    location_id=location.id,
+                    source_id=job.source_id,
+                    status="queued",
+                    payload={"reply_id": reply.id},
+                )
             )
-            session.add(next_job)
             reply.status = "pending"
         else:
             reply.status = "suggested"
 
         job.status = "completed"
         job.result = {"reply_id": reply.id, "action": "generated"}
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.utcnow()
         session.commit()
 
         logger.info(
-            f"Reply generated for review {review.id} "
-            f"({review.platform} {review.rating}*) at {location.name}"
+            "Reply generated for review %s (%s %s*) at %s",
+            review.id,
+            review.platform,
+            review.rating,
+            location.name,
         )
 
-    except Exception as e:
-        logger.error(f"task_generate_reply failed for job {job_id}: {e}")
-        if job:
+    except Exception as exc:
+        logger.error("task_generate_reply failed for job %s: %s", job_id, exc)
+        if "job" in locals() and job:
             job.status = "failed"
-            job.error_message = str(e)[:500]
+            job.error_message = str(exc)[:500]
             session.commit()
         raise
     finally:
@@ -124,7 +124,7 @@ def task_generate_reply(job_id: int):
 
 
 def task_post_reply(job_id: int):
-    """Post an AI reply to Google Business Profile."""
+    """Mark an operator-assisted reply as approved."""
     session = SyncSessionLocal()
     try:
         job = session.get(Job, job_id)
@@ -132,7 +132,7 @@ def task_post_reply(job_id: int):
             return
 
         job.status = "processing"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.utcnow()
         session.commit()
 
         reply_id = (job.payload or {}).get("reply_id")
@@ -146,17 +146,16 @@ def task_post_reply(job_id: int):
             session.commit()
             return
 
-        # Portal posting is intentionally operator-assisted for now.
         reply.status = "approved"
         reply.is_dry_run = settings.dry_run
         job.status = "completed"
         job.result = {"posted": False, "mode": "operator_assisted", "dry_run": settings.dry_run}
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.utcnow()
         session.commit()
         logger.info("Reply approved for review %s at %s; waiting for manual portal posting", review.id, location.name)
 
-    except Exception as e:
-        logger.error(f"task_post_reply failed for job {job_id}: {e}")
+    except Exception as exc:
+        logger.error("task_post_reply failed for job %s: %s", job_id, exc)
         raise
     finally:
         session.close()
@@ -171,7 +170,7 @@ def task_send_alert_email(job_id: int):
             return
 
         job.status = "processing"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.utcnow()
         session.commit()
 
         reply_id = (job.payload or {}).get("reply_id")
@@ -187,7 +186,6 @@ def task_send_alert_email(job_id: int):
 
         loc_str = f"{location.city}, {location.state}" if location.city else ""
         suggested = reply.ai_reply_text if reply else ""
-
         sent = send_low_rating_alert(
             reviewer_name=review.reviewer_name or "Anonymous",
             rating=review.rating,
@@ -198,27 +196,27 @@ def task_send_alert_email(job_id: int):
             review_id=review.id,
         )
 
-        # Record alert
-        alert = EmailAlert(
-            review_id=review.id,
-            recipient=settings.alert_email_to,
-            subject=f"[{review.rating} Star] Negative Review - {location.name}",
-            body=f"Review by {review.reviewer_name}: {(review.review_text or '')[:200]}",
-            status="sent" if sent else "failed",
-            sent_at=datetime.now(timezone.utc) if sent else None,
+        session.add(
+            EmailAlert(
+                review_id=review.id,
+                recipient=settings.alert_email_to,
+                subject=f"[{review.rating} Star] Negative Review - {location.name}",
+                body=f"Review by {review.reviewer_name}: {(review.review_text or '')[:200]}",
+                status="sent" if sent else "failed",
+                sent_at=datetime.utcnow() if sent else None,
+            )
         )
-        session.add(alert)
 
         if reply:
             reply.status = "email_sent" if sent else "pending"
 
         job.status = "completed" if sent else "failed"
         job.result = {"email_sent": sent}
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.utcnow()
         session.commit()
 
-    except Exception as e:
-        logger.error(f"task_send_alert_email failed for job {job_id}: {e}")
+    except Exception as exc:
+        logger.error("task_send_alert_email failed for job %s: %s", job_id, exc)
         raise
     finally:
         session.close()

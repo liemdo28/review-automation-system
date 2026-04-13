@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -24,7 +24,7 @@ class ReplySuggestion(Base):
     risk_flags: Mapped[list[str] | None] = mapped_column(JSONB)
     confidence_note: Mapped[str | None] = mapped_column(Text)
     reason_summary: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     created_by: Mapped[str | None] = mapped_column(String(64))
 
     review: Mapped["Review"] = relationship(back_populates="suggestions")

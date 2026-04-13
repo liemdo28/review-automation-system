@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import ForeignKey, Index, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,7 +23,7 @@ class Job(Base):
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
     error_message: Mapped[str | None] = mapped_column(Text)
-    queued_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    queued_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column()
     completed_at: Mapped[datetime | None] = mapped_column()
 

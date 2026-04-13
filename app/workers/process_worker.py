@@ -1,7 +1,7 @@
 """Process queued jobs either inline or through rq."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 
@@ -61,7 +61,7 @@ def _dispatch_to_rq(session, jobs):
 
         default_queue.enqueue(task_fn, job.id, job_timeout="5m", retry=None)
         job.status = "processing"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.utcnow()
         dispatched += 1
 
     session.commit()
@@ -80,7 +80,7 @@ def _process_inline(session, jobs):
             continue
 
         job.status = "processing"
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.utcnow()
         to_run.append((job.id, task_fn))
 
     session.commit()

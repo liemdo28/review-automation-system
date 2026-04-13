@@ -36,8 +36,10 @@ class PageReviewProvider(ReviewProvider):
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
             try:
-                await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
+                response = await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
                 await asyncio.sleep(1.5)
+                if await self._looks_blocked(page, response):
+                    return False, "reauth_required"
                 if await self._looks_unauthenticated(page):
                     return False, "reauth_required"
                 return True, "active"
@@ -59,8 +61,17 @@ class PageReviewProvider(ReviewProvider):
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
             try:
-                await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
+                response = await page.goto(self.source.source_url, wait_until="domcontentloaded", timeout=45000)
                 await asyncio.sleep(2)
+                if await self._looks_blocked(page, response):
+                    raise ProviderAuthRequiredError(
+                        "Source page was blocked; refresh or attach an authorized session before syncing again",
+                        details={
+                            "source_id": self.source.id,
+                            "platform": self.source.platform,
+                            "http_status": response.status if response else None,
+                        },
+                    )
                 if await self._looks_unauthenticated(page):
                     raise ProviderAuthRequiredError(
                         "Authorized session is required for this source",
@@ -68,6 +79,12 @@ class PageReviewProvider(ReviewProvider):
                     )
                 await self._load_review_surface(page)
                 reviews = await self._extract_reviews(page)
+                if not reviews and not self.settings.get("allow_empty_results", False):
+                    raise ProviderFetchError(
+                        "No review cards were detected on the source page; selectors or access may need attention",
+                        retryable=False,
+                        details={"source_id": self.source.id, "platform": self.source.platform},
+                    )
                 return reviews
             except ProviderAuthRequiredError:
                 raise
@@ -158,6 +175,27 @@ class PageReviewProvider(ReviewProvider):
         login_url_patterns = self.settings.get("auth_required_url_patterns") or ["login", "signin"]
         page_url = (page.url or "").lower()
         return any(pattern in page_url for pattern in login_url_patterns)
+
+    async def _looks_blocked(self, page, response=None) -> bool:
+        blocked_statuses = self.settings.get("blocked_statuses") or [401, 403, 429]
+        if response and response.status in blocked_statuses:
+            return True
+
+        blocked_selectors = self.settings.get("blocked_selectors") or []
+        for selector in blocked_selectors:
+            if await page.query_selector(selector):
+                return True
+
+        if response and response.status and response.status >= 400:
+            return True
+
+        try:
+            body_text = (await page.locator("body").inner_text()).strip()
+        except Exception:
+            body_text = ""
+
+        min_body_text_chars = int(self.settings.get("min_body_text_chars", 25))
+        return len(body_text) < min_body_text_chars
 
     async def _extract_id(self, element, index: int) -> str:
         id_attributes = self.settings.get("review_id_attributes") or ["data-review-id", "data-testid"]

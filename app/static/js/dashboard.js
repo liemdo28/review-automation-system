@@ -11,6 +11,21 @@ async function triggerFetch(query = "") {
     }
 }
 
+async function launchSessionBootstrap(sourceId, sourceLabel = "source", platform = "source") {
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/bootstrap`, { method: "POST" });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.detail || "Bootstrap launch failed.");
+        }
+        alert(
+            `Login window opened for ${sourceLabel} (${platform}). Sign in there, stay on the correct review page, then press ENTER in the START login window to save that session.`,
+        );
+    } catch (error) {
+        alert("Failed to launch login bootstrap: " + error.message);
+    }
+}
+
 async function approveReply(reviewId) {
     try {
         const resp = await fetch(`/api/reviews/${reviewId}/approve`, { method: "POST" });

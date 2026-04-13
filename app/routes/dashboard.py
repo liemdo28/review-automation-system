@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
@@ -375,8 +375,6 @@ async def admin_add_source_session(
     if expires_at:
         try:
             parsed_expiry = datetime.fromisoformat(expires_at)
-            if parsed_expiry.tzinfo is None:
-                parsed_expiry = parsed_expiry.replace(tzinfo=timezone.utc)
         except ValueError:
             parsed_expiry = None
 
@@ -385,11 +383,11 @@ async def admin_add_source_session(
         platform=source.platform,
         session_reference=session_reference,
         expires_at=parsed_expiry,
-        last_validated_at=datetime.now(timezone.utc),
+        last_validated_at=datetime.utcnow(),
         status=session_status,
     )
     db.add(auth_session)
     source.session_status = session_status
-    source.last_auth_at = datetime.now(timezone.utc)
+    source.last_auth_at = datetime.utcnow()
     await db.commit()
     return RedirectResponse("/admin/sources", status_code=303)

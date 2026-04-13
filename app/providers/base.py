@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import re
 from typing import Any
 
@@ -89,7 +89,7 @@ class ReviewProvider(ABC):
             return None
 
         raw = text.strip()
-        now = datetime.now(timezone.utc)
+        now = datetime.utcnow()
         relative = re.match(
             r"(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago",
             raw,
@@ -110,7 +110,7 @@ class ReviewProvider(ABC):
 
         for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"):
             try:
-                return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+                return datetime.strptime(raw, fmt)
             except ValueError:
                 continue
         return None

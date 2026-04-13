@@ -3,45 +3,88 @@
 {% block content %}
 <section class="page-header compact">
     <div>
-        <p class="eyebrow">Configuration View</p>
-        <h1>Locations and review sources</h1>
+        <p class="eyebrow">Source Operations</p>
+        <h1>Store sources and login readiness</h1>
+        <p class="hero-copy">Use the login button on the exact Google or Yelp source you want. START will open a dedicated login window for that source, save the session, and then sync that source again.</p>
+    </div>
+    <div class="hero-actions">
+        <button class="btn" onclick="triggerFetch()">Sync All Sources</button>
+        <a href="/admin/sources" class="btn btn-secondary">Open Admin Settings</a>
     </div>
 </section>
 
-<div class="location-grid">
+<section class="inline-note source-login-note">
+    <strong>Recommended flow:</strong>
+    <span>Click <strong>Login Google</strong> or <strong>Login Yelp</strong> on the source you need, finish sign-in in the opened window, then press <strong>Enter</strong> in that bootstrap window to save the session.</span>
+</section>
+
+<div class="location-workspaces">
     {% for item in locations %}
-    <div class="location-card location-card-large">
-        <div class="section-header">
-            <div>
+    <section class="location-workspace">
+        <div class="location-workspace-head">
+            <div class="location-identity">
+                <p class="eyebrow">Store {{ loop.index }}</p>
                 <h2>{{ item.loc.name }}</h2>
                 <p class="location-address">{{ item.loc.address }}</p>
                 <p class="text-muted">{{ item.loc.city }}, {{ item.loc.state }}</p>
             </div>
-            <button class="btn btn-secondary btn-sm" onclick="triggerFetch('location_id={{ item.loc.id }}')">Sync Store</button>
-        </div>
-
-        <div class="location-detail-stats">
-            <div class="stat-row">
-                <span class="badge badge-google">Google</span>
-                <span>{{ item.google_count }} open items</span>
-            </div>
-            <div class="stat-row">
-                <span class="badge badge-yelp">Yelp</span>
-                <span>{{ item.yelp_count }} open items</span>
+            <div class="location-actions">
+                <button class="btn btn-secondary" onclick="triggerFetch('location_id={{ item.loc.id }}')">Sync Store</button>
+                <a href="/reviews?location_id={{ item.loc.id }}" class="btn btn-secondary">Open Queue</a>
             </div>
         </div>
 
-        <div class="history-list compact-history">
+        <div class="location-metrics">
+            <div class="location-metric">
+                <span class="metric-label">Google open</span>
+                <strong>{{ item.google_count }}</strong>
+            </div>
+            <div class="location-metric">
+                <span class="metric-label">Yelp open</span>
+                <strong>{{ item.yelp_count }}</strong>
+            </div>
+            <div class="location-metric">
+                <span class="metric-label">Sources</span>
+                <strong>{{ item.sources|length }}</strong>
+            </div>
+        </div>
+
+        <div class="source-table">
             {% for source in item.sources %}
-            <article class="history-card">
-                <div class="history-head">
-                    <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
-                    <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
+            <article class="source-row source-row-{{ source.session_status }}">
+                <div class="source-row-main">
+                    <div class="source-row-title">
+                        <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
+                        <strong>{{ source.source_label or source.platform|title }}</strong>
+                    </div>
+                    <p class="text-muted source-url">{{ source.source_url }}</p>
                 </div>
-                <p>{{ source.source_label or source.platform|title }}</p>
-                <p class="text-muted">{{ source.source_url }}</p>
-                <div class="reply-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="triggerFetch('source_id={{ source.id }}')">Sync Source</button>
+
+                <div class="source-row-meta">
+                    <div class="source-meta-block">
+                        <span class="meta-caption">Session</span>
+                        <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
+                    </div>
+                    <div class="source-meta-block">
+                        <span class="meta-caption">Last successful sync</span>
+                        <strong>
+                            {% if source.last_successful_sync_at %}
+                            {{ source.last_successful_sync_at.strftime('%m/%d %H:%M') }}
+                            {% else %}
+                            Not synced yet
+                            {% endif %}
+                        </strong>
+                    </div>
+                </div>
+
+                <div class="source-row-actions">
+                    <button
+                        class="btn btn-login btn-platform-{{ source.platform }}"
+                        onclick='launchSessionBootstrap({{ source.id }}, {{ (source.source_label or source.platform|title)|tojson }}, {{ source.platform|tojson }})'
+                    >
+                        Login {{ source.platform|title }}
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="triggerFetch('source_id={{ source.id }}')">Sync</button>
                     <a href="{{ source.source_url }}" target="_blank" rel="noreferrer" class="btn btn-secondary btn-sm">Open Page</a>
                 </div>
             </article>
@@ -49,7 +92,7 @@
             <p class="text-muted">No review sources configured.</p>
             {% endfor %}
         </div>
-    </div>
+    </section>
     {% endfor %}
 </div>
 {% endblock %}

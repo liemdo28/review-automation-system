@@ -83,7 +83,9 @@
                     <span>Expires at (optional)</span>
                     <input type="datetime-local" name="expires_at">
                 </label>
+                <p class="text-muted">Use <strong>Login {{ item.source.platform|title }}</strong> for the guided flow: START opens the correct browser window for this source, you sign in manually, then the session file is saved and attached automatically.</p>
                 <div class="reply-actions">
+                    <button type="button" class="btn btn-login btn-platform-{{ item.source.platform }}" onclick='launchSessionBootstrap({{ item.source.id }}, {{ (item.source.source_label or item.source.platform|title)|tojson }}, {{ item.source.platform|tojson }})'>Login {{ item.source.platform|title }}</button>
                     <button type="submit" class="btn btn-secondary">Save Session</button>
                 </div>
             </form>

@@ -25,8 +25,8 @@ body {
     margin: 0;
     color: var(--ink);
     background:
-        radial-gradient(circle at top right, rgba(198, 140, 30, 0.16), transparent 26%),
-        linear-gradient(180deg, #f8efe1 0%, #f7f1e8 42%, #f2e7d7 100%);
+        radial-gradient(circle at top left, rgba(159, 47, 37, 0.08), transparent 20%),
+        linear-gradient(180deg, #faf7f1 0%, #f4eee6 100%);
     font-family: var(--font-ui);
 }
 
@@ -88,6 +88,11 @@ a {
     background: rgba(159, 47, 37, 0.08);
 }
 
+.nav-link.active {
+    background: rgba(159, 47, 37, 0.12);
+    color: var(--brand-deep);
+}
+
 .nav-status {
     display: flex;
     align-items: center;
@@ -105,7 +110,7 @@ a {
 }
 
 .container {
-    max-width: 1440px;
+    max-width: 1480px;
     margin: 0 auto;
     padding: 28px;
 }
@@ -182,7 +187,7 @@ a {
     background: var(--surface);
     border: 1px solid rgba(106, 30, 24, 0.08);
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
+    box-shadow: 0 12px 30px rgba(80, 42, 20, 0.06);
 }
 
 .stat-card {
@@ -438,6 +443,20 @@ a {
     color: var(--brand-deep);
 }
 
+.btn-login {
+    min-width: 132px;
+}
+
+.btn-platform-google {
+    background: linear-gradient(135deg, #2666f6, #1646c9);
+    color: #f8fbff;
+}
+
+.btn-platform-yelp {
+    background: linear-gradient(135deg, #e24131, #b8281d);
+    color: #fff8f5;
+}
+
 .btn-sm {
     padding: 8px 12px;
     font-size: 12px;
@@ -584,6 +603,130 @@ a {
     padding: 18px;
 }
 
+.source-login-note {
+    margin-bottom: 18px;
+}
+
+.location-workspaces {
+    display: grid;
+    gap: 18px;
+}
+
+.location-workspace {
+    background: rgba(255, 250, 242, 0.86);
+    border: 1px solid rgba(106, 30, 24, 0.08);
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 16px 34px rgba(80, 42, 20, 0.07);
+}
+
+.location-workspace-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.location-identity {
+    display: grid;
+    gap: 6px;
+}
+
+.location-identity h2 {
+    margin: 0;
+}
+
+.location-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.location-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.location-metric {
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(106, 30, 24, 0.08);
+    background: rgba(255, 253, 248, 0.92);
+    display: grid;
+    gap: 6px;
+}
+
+.location-metric strong {
+    font-family: var(--font);
+    font-size: 26px;
+    color: var(--brand-deep);
+}
+
+.source-table {
+    display: grid;
+    gap: 12px;
+}
+
+.source-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(240px, 0.8fr) auto;
+    gap: 18px;
+    align-items: center;
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(106, 30, 24, 0.08);
+    background: rgba(255, 253, 248, 0.96);
+}
+
+.source-row-reauth_required,
+.source-row-failed {
+    background: rgba(185, 75, 46, 0.06);
+    border-color: rgba(185, 75, 46, 0.2);
+}
+
+.source-row-main,
+.source-row-meta,
+.source-meta-block {
+    display: grid;
+    gap: 6px;
+}
+
+.source-row-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.source-url {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+.source-row-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.meta-caption {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.source-row-actions {
+    display: flex;
+    justify-content: end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .location-detail-stats,
 .compact-history {
     margin-top: 14px;
@@ -622,6 +765,14 @@ a {
     .detail-grid {
         grid-template-columns: 1fr;
     }
+
+    .source-row {
+        grid-template-columns: 1fr;
+    }
+
+    .source-row-actions {
+        justify-content: start;
+    }
 }
 
 @media (max-width: 860px) {
@@ -640,12 +791,21 @@ a {
     .container {
         padding: 18px;
     }
+
+    .location-workspace-head {
+        flex-direction: column;
+    }
 }
 
 @media (max-width: 640px) {
     .stats-grid,
     .filter-form,
     .location-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .location-metrics,
+    .source-row-meta {
         grid-template-columns: 1fr;
     }
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy import Boolean, ForeignKey, Index, SmallInteger, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -35,14 +35,14 @@ class Review(Base):
     has_owner_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_data: Mapped[dict | None] = mapped_column(JSONB)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
-    collected_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
-    first_seen_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
-    last_seen_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    collected_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    first_seen_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     is_handled: Mapped[bool] = mapped_column(Boolean, default=False)
     handled_at: Mapped[datetime | None] = mapped_column()
     handled_by: Mapped[str | None] = mapped_column(String(64))
-    fetched_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
-    created_at: Mapped[datetime] = mapped_column(default=lambda: datetime.now(timezone.utc))
+    fetched_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     location: Mapped["Location"] = relationship(back_populates="reviews")
     reply: Mapped["Reply | None"] = relationship(back_populates="review", uselist=False)
