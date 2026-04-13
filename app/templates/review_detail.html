@@ -8,12 +8,12 @@
 </section>
 
 <section class="workspace-section dual-grid">
-    <div class="panel">
+    <div class="panel store-accent-card" style="{{ store_theme_style(location) }}">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Guest Review</p>
                 <h2>{{ review.reviewer_name or 'Anonymous' }}</h2>
-                <p class="section-copy">{{ location.name if location else 'Unknown location' }} · {{ review.review_date.strftime('%B %d, %Y') if review.review_date else 'No date' }}</p>
+                <p class="section-copy"><span class="store-chip" style="{{ store_theme_style(location) }}">{{ location.name if location else 'Unknown location' }}</span> · {{ review.review_date.strftime('%B %d, %Y') if review.review_date else 'No date' }}</p>
             </div>
             <div class="review-row-statuses">
                 <span class="badge badge-{{ review.platform }}">{{ review.platform }}</span>
@@ -38,6 +38,16 @@
             <p class="review-copy-full">{{ review.review_text or 'No written comment was provided.' }}</p>
         </div>
 
+        <div class="meta-list">
+            <div><span>Workflow status</span><strong>{{ review.workflow_status.replace('_', ' ') if review.workflow_status else review_status.replace('_', ' ') }}</strong></div>
+            <div><span>Risk level</span><strong>{{ review.auto_reply_risk_level or '-' }}</strong></div>
+            <div><span>Auto-post eligible</span><strong>{{ 'Yes' if review.auto_reply_eligible else 'No' }}</strong></div>
+            <div><span>Decision reason</span><strong>{{ review.auto_reply_decision_reason or '-' }}</strong></div>
+            <div><span>Escalation reason</span><strong>{{ review.escalation_reason or '-' }}</strong></div>
+            <div><span>Policy version</span><strong>{{ review.policy_version or '-' }}</strong></div>
+            <div><span>Configured brand tone</span><strong>{{ auto_reply_config.brand_tone_mode.replace('_', ' ') if auto_reply_config.brand_tone_mode else '-' }}</strong></div>
+        </div>
+
         {% if review.has_owner_reply %}
         <div class="review-copy-block">
             <span class="block-label">Owner reply detected on source</span>
@@ -55,7 +65,7 @@
         {% endif %}
     </div>
 
-    <div class="panel">
+    <div class="panel store-accent-card" style="{{ store_theme_style(location) }}">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Suggested Reply</p>
@@ -75,11 +85,38 @@
             <div><span>Issue tags</span><strong>{{ (reply.issue_tags or [])|join(', ') or '-' }}</strong></div>
             <div><span>Risk flags</span><strong>{{ (reply.risk_flags or [])|join(', ') or '-' }}</strong></div>
         </div>
+        <div class="info-strip">
+            {% if source and source.platform == "google" %}
+            <strong>Google UI posting fallback is available.</strong>
+            <span>When the review is eligible, auto-post is enabled, and the Google session is healthy, START can open the Google review UI, paste the prepared reply, submit it, verify success, and then continue to the next queued item.</span>
+            {% else %}
+            <strong>Portal posting stays manual.</strong>
+            <span>START can approve, copy, and open the draft context here, but staff still post the final reply on the Google or Yelp source page.</span>
+            {% endif %}
+        </div>
         <div class="section-actions">
             <button class="btn" onclick="approveReply({{ review.id }})">Approve</button>
             <button class="btn btn-secondary" onclick="regenerateReply({{ review.id }})">Regenerate</button>
+            <button class="btn btn-secondary" onclick="evaluateAutoReply({{ review.id }})">Evaluate Auto Reply</button>
+            {% if source and source.platform == "google" %}
+            <button
+                class="btn btn-secondary"
+                onclick="autoReplyUI({{ review.id }})"
+                {% if dry_run or not review.auto_reply_eligible or not auto_reply_config.auto_post_phase_enabled or source.session_status != "active" %}disabled{% endif %}
+                title="{% if dry_run %}DRY_RUN is enabled. Turn it off before live auto posting.{% elif not auto_reply_config.auto_post_phase_enabled %}Enable Google auto-post in Auto Reply settings first.{% elif source.session_status != "active" %}Google session must be active before UI posting.{% elif not review.auto_reply_eligible %}This review is not currently eligible for auto posting.{% else %}Use the Google UI fallback to post this reply automatically.{% endif %}"
+            >
+                Auto Reply via Google UI
+            </button>
+            {% else %}
+            <button class="btn btn-secondary" type="button" disabled title="Direct source posting is only supported for Google right now.">Auto-post unavailable</button>
+            {% endif %}
+            <button class="btn btn-secondary" onclick="markReviewManual({{ review.id }})">Mark Manual</button>
+            <button class="btn btn-secondary" onclick="markReviewEscalated({{ review.id }})">Escalate</button>
             <button class="btn btn-secondary" onclick="copyReply()">Copy Reply</button>
             <button class="btn btn-secondary" onclick="markSingleHandled({{ review.id }})">Mark Handled</button>
+            {% if source %}
+            <a class="btn btn-secondary" href="{{ source.resolved_source_url or source.source_url }}" target="_blank" rel="noreferrer">Open Source Page</a>
+            {% endif %}
         </div>
         {% else %}
         <p class="empty-state">No suggestion exists for this review yet.</p>
@@ -91,7 +128,7 @@
 </section>
 
 <section class="workspace-section dual-grid">
-    <div class="panel">
+    <div class="panel store-accent-card" style="{{ store_theme_style(location) }}">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Suggestion History</p>
@@ -114,7 +151,7 @@
         </div>
     </div>
 
-    <div class="panel">
+    <div class="panel store-accent-card" style="{{ store_theme_style(location) }}">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Workflow Jobs</p>
@@ -144,7 +181,7 @@
 </section>
 
 <section class="workspace-section">
-    <div class="panel">
+    <div class="panel store-accent-card" style="{{ store_theme_style(location) }}">
         <div class="section-head">
             <div>
                 <p class="eyebrow">Source Metadata</p>

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Auto Reply - START{% endblock %}
+{% block shell_title %}Auto Reply workspace{% endblock %}
+{% block shell_subtitle %}Review safe candidates, blocked dependencies, and recent failures before running automation across the queue.{% endblock %}
+{% block content %}
+<section class="workspace-section">
+    <div class="panel ai-summary-hero">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Auto Reply Control</p>
+                <h2>{{ eligible_items|length }} reviews are ready, {{ blocked_items|length }} are blocked by auth, and {{ failed_items|length }} recently failed.</h2>
+                <p class="section-copy">Use this workspace to run safe review batches only when sessions, policy, and tone settings are all aligned.</p>
+            </div>
+            <div class="section-actions">
+                <button class="btn" onclick="triggerFetch()">Run now</button>
+                <a href="/admin/auto-reply" class="btn btn-secondary">Open policy settings</a>
+                <a href="/reviews?status=auto_post_failed" class="btn btn-secondary">Retry failed</a>
+            </div>
+        </div>
+        <div class="metric-grid compact-metrics">
+            <article class="metric-tile"><span class="metric-label">Eligible queue</span><strong class="metric-value">{{ eligible_items|length }}</strong></article>
+            <article class="metric-tile accent-neutral"><span class="metric-label">Healthy sources</span><strong class="metric-value">{{ healthy_sources }}</strong></article>
+            <article class="metric-tile accent-warning"><span class="metric-label">Paused / blocked</span><strong class="metric-value">{{ paused_sources }}</strong></article>
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Eligible Queue</p>
+                <h2>Ready for controlled automation</h2>
+            </div>
+            <a href="/reviews?status=auto_post_eligible" class="btn btn-secondary btn-sm">Open full queue</a>
+        </div>
+        <div class="history-list">
+            {% for item in eligible_items %}
+            <article class="history-card store-accent-card" style="{{ store_theme_style(item.location) }}">
+                <div class="history-head">
+                    <strong>{{ item.review.reviewer_name or 'Anonymous' }}</strong>
+                    <span class="status status-posted">{{ item.review.platform }}</span>
+                </div>
+                <p class="text-muted"><span class="store-chip" style="{{ store_theme_style(item.location) }}">{{ item.location.name if item.location else '-' }}</span> · {{ item.review.rating }}/5</p>
+                <p>{{ item.review.auto_reply_decision_reason or 'Eligible for auto reply.' }}</p>
+                <div class="section-actions">
+                    <a class="btn btn-secondary btn-sm" href="/reviews?status=auto_post_eligible&focus_id={{ item.review.id }}">Inspect</a>
+                    <a class="btn btn-secondary btn-sm" href="/reviews/{{ item.review.id }}">Open detail</a>
+                </div>
+            </article>
+            {% else %}
+            <p class="empty-state">No reviews are currently marked auto-post eligible.</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Blocked Queue</p>
+                <h2>Items waiting on auth or policy</h2>
+            </div>
+        </div>
+        <div class="history-list">
+            {% for item in blocked_items %}
+            <article class="history-card store-accent-card" style="{{ store_theme_style(item.location) }}">
+                <div class="history-head">
+                    <strong>{{ item.review.reviewer_name or 'Anonymous' }}</strong>
+                    <span class="status status-failed">{{ item.review.workflow_status or 'blocked' }}</span>
+                </div>
+                <p class="text-muted"><span class="store-chip" style="{{ store_theme_style(item.location) }}">{{ item.location.name if item.location else '-' }}</span> · {{ item.review.platform }}</p>
+                <p>{{ item.review.auto_reply_decision_reason or 'Blocked by source status or policy.' }}</p>
+            </article>
+            {% else %}
+            <p class="empty-state">No auth-blocked items right now.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Recent Failures</p>
+                <h2>Posting failures to inspect before retry</h2>
+            </div>
+        </div>
+        <div class="history-list">
+            {% for item in failed_items %}
+            <article class="history-card store-accent-card" style="{{ store_theme_style(item.location) }}">
+                <div class="history-head">
+                    <strong>{{ item.review.reviewer_name or 'Anonymous' }}</strong>
+                    <span class="status status-failed">failed</span>
+                </div>
+                <p class="text-muted">{{ item.location.name if item.location else '-' }} · {{ item.review.platform }}</p>
+                <p>{{ item.review.auto_reply_decision_reason or 'Auto-post failed and needs review.' }}</p>
+            </article>
+            {% else %}
+            <p class="empty-state">No recent auto-reply failures.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -8,13 +8,23 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import SyncSessionLocal
 from app.models import Job
-from app.workers.reply_worker import task_generate_reply, task_post_reply, task_send_alert_email
+from app.workers.reply_worker import (
+    task_escalate_review,
+    task_generate_reply,
+    task_post_reply,
+    task_review_decision,
+    task_send_alert_email,
+)
+from app.workers.post_ui_worker import task_post_ui_reply
 
 logger = logging.getLogger("review_system.process_worker")
 
 TASK_MAP = {
     "generate_reply": task_generate_reply,
+    "review_decision": task_review_decision,
     "post_reply": task_post_reply,
+    "post_ui_reply": task_post_ui_reply,
+    "escalate_review": task_escalate_review,
     "send_alert_email": task_send_alert_email,
 }
 

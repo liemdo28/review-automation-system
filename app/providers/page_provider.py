@@ -34,16 +34,7 @@ class PageReviewProvider(ReviewProvider):
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True, **self._browser_launch_kwargs())
-            context_kwargs = {
-                "viewport": {"width": 1600, "height": 1200},
-                "locale": settings.review_browser_locale,
-                "timezone_id": settings.review_browser_timezone,
-                "extra_http_headers": {"Accept-Language": f"{settings.review_browser_locale},en;q=0.9"},
-            }
-            storage_state = self._storage_state_path()
-            if storage_state:
-                context_kwargs["storage_state"] = storage_state
-            context = await browser.new_context(**context_kwargs)
+            context = await browser.new_context(**self._browser_context_kwargs())
             page = await context.new_page()
             try:
                 response = await page.goto(source_url, wait_until="domcontentloaded", timeout=45000)
@@ -65,16 +56,7 @@ class PageReviewProvider(ReviewProvider):
 
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True, **self._browser_launch_kwargs())
-            context_kwargs = {
-                "viewport": {"width": 1600, "height": 1200},
-                "locale": settings.review_browser_locale,
-                "timezone_id": settings.review_browser_timezone,
-                "extra_http_headers": {"Accept-Language": f"{settings.review_browser_locale},en;q=0.9"},
-            }
-            storage_state = self._storage_state_path()
-            if storage_state:
-                context_kwargs["storage_state"] = storage_state
-            context = await browser.new_context(**context_kwargs)
+            context = await browser.new_context(**self._browser_context_kwargs())
             page = await context.new_page()
             try:
                 response = await page.goto(source_url, wait_until="domcontentloaded", timeout=45000)
@@ -296,3 +278,15 @@ class PageReviewProvider(ReviewProvider):
                 "args": [f"--lang={settings.review_browser_locale}", "--disable-blink-features=AutomationControlled"],
             }
         return {"args": [f"--lang={settings.review_browser_locale}", "--disable-blink-features=AutomationControlled"]}
+
+    def _browser_context_kwargs(self) -> dict[str, Any]:
+        context_kwargs = {
+            "viewport": {"width": 1600, "height": 1200},
+            "locale": settings.review_browser_locale,
+            "timezone_id": settings.review_browser_timezone,
+            "extra_http_headers": {"Accept-Language": f"{settings.review_browser_locale},en;q=0.9"},
+        }
+        storage_state = self._storage_state_path()
+        if storage_state:
+            context_kwargs["storage_state"] = storage_state
+        return context_kwargs

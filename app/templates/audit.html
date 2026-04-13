@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Audit - START{% endblock %}
+{% block shell_title %}Negative review audit workspace{% endblock %}
+{% block shell_subtitle %}All reviews at 3 stars and below are grouped here for issue analysis, escalation, and GM follow-up.{% endblock %}
+{% block content %}
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Issue Summary</p>
+                <h2>Where low-rated reviews are clustering</h2>
+            </div>
+            <a href="/reports" class="btn btn-secondary btn-sm">Open reports</a>
+        </div>
+        <div class="metric-grid compact-metrics">
+            <article class="metric-tile accent-alert"><span class="metric-label">Audit queue</span><strong class="metric-value">{{ audit_items|length }}</strong></article>
+            <article class="metric-tile accent-warning"><span class="metric-label">Escalated</span><strong class="metric-value">{{ shell_counts.escalated }}</strong></article>
+            <article class="metric-tile accent-neutral"><span class="metric-label">Blocked auth</span><strong class="metric-value">{{ shell_counts.auth_blocked }}</strong></article>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Breakdowns</p>
+                <h2>Store, issue, and severity view</h2>
+            </div>
+        </div>
+        <div class="ai-context-list">
+            {% for store_name, count in by_store[:4] %}
+            <article class="ai-context-row"><span>{{ store_name }}</span><strong>{{ count }}</strong></article>
+            {% endfor %}
+            {% for issue, count in by_issue[:4] %}
+            <article class="ai-context-row"><span>{{ (issue or 'uncategorized').replace('_', ' ') }}</span><strong>{{ count }}</strong></article>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Audit Queue</p>
+                <h2>Low-rated reviews requiring management judgment</h2>
+            </div>
+            <a href="/reviews?ratings=1&ratings=2&ratings=3" class="btn btn-secondary btn-sm">Open filtered queue</a>
+        </div>
+        <div class="review-queue">
+            {% for item in audit_items %}
+            <article class="review-row ai-task-card store-accent-card" style="{{ store_theme_style(item.location) }}">
+                <div class="review-row-main">
+                    <div class="review-row-top">
+                        <div class="review-row-identity">
+                            <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
+                            <h3>{{ item.review.reviewer_name or 'Anonymous' }}</h3>
+                            <span class="store-chip" style="{{ store_theme_style(item.location) }}">{{ item.location.name if item.location else '-' }}</span>
+                        </div>
+                        <div class="review-row-statuses">
+                            <span class="status status-failed">{{ item.review.workflow_status or 'audit' }}</span>
+                            {% if item.review.severity_level %}<span class="status status-{{ item.review.severity_level }}">{{ item.review.severity_level }}</span>{% endif %}
+                        </div>
+                    </div>
+                    <div class="review-row-grid ai-task-grid">
+                        <div class="review-copy-block">
+                            <span class="block-label">Customer review</span>
+                            <p class="review-copy-full review-copy-preview">{{ item.review.review_text or 'No written comment' }}</p>
+                        </div>
+                        <div class="review-copy-block">
+                            <span class="block-label">Issue category</span>
+                            <p class="review-copy-full">{{ item.review.issue_category.replace('_', ' ') if item.review.issue_category else 'Uncategorized' }}</p>
+                            <p class="text-muted">{{ item.review.analysis_summary or 'No analysis summary yet.' }}</p>
+                        </div>
+                        <div class="review-copy-block">
+                            <span class="block-label">Suggested action</span>
+                            <p class="review-copy-full">{{ item.review.escalation_reason or item.review.auto_reply_decision_reason or 'Reply only' }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="review-row-side">
+                    <a href="/reviews?ratings=1&ratings=2&ratings=3&focus_id={{ item.review.id }}" class="btn btn-secondary btn-sm">Inspect</a>
+                    <a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open detail</a>
+                </div>
+            </article>
+            {% else %}
+            <p class="empty-state">No low-rated reviews in the audit queue.</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -43,6 +43,17 @@ class ProviderFetchError(ProviderError):
         super().__init__(message, code="fetch_error", retryable=retryable, details=details)
 
 
+class ProviderPostError(ProviderError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = True,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="post_error", retryable=retryable, details=details)
+
+
 @dataclass(slots=True)
 class ProviderReview:
     external_review_id: str
@@ -73,6 +84,12 @@ class ReviewProvider(ABC):
     @abstractmethod
     async def fetch_reviews(self) -> list[ProviderReview]:
         raise NotImplementedError
+
+    async def post_reply(self, review, reply_text: str) -> dict[str, Any]:
+        raise ProviderConfigError(
+            f"Direct reply posting is not supported for {self.platform}",
+            details={"platform": self.platform, "source_id": self.source.id},
+        )
 
     @staticmethod
     def parse_rating(text: str | None) -> int:

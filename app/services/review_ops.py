@@ -10,6 +10,19 @@ from app.models import Job, Reply, Review
 
 
 PENDING_REPLY_STATUSES = {"pending", "suggested", "email_sent"}
+WORKFLOW_STATUSES = {
+    "unreplied",
+    "suggested",
+    "manual_review_required",
+    "auto_post_eligible",
+    "approved",
+    "posted",
+    "auto_post_failed",
+    "escalated",
+    "blocked_auth",
+    "handled",
+    "replied",
+}
 
 
 @dataclass(slots=True)
@@ -17,6 +30,7 @@ class ReviewFilters:
     location_id: int | None = None
     platform: str | None = None
     rating: int | None = None
+    ratings: list[int] | None = None
     status: str | None = None
     date_preset: str | None = None
     date_from: date | None = None
@@ -43,7 +57,8 @@ def resolve_date_range(filters: ReviewFilters) -> tuple[datetime | None, datetim
     preset = (filters.date_preset or "").lower()
     if preset in {"1d", "3d", "7d", "30d"}:
         days = int(preset.replace("d", ""))
-        return now - timedelta(days=days), now
+        start_date = (now - timedelta(days=days)).date()
+        return start_of_day(start_date), end_of_day(now.date())
     return None, None
 
 
@@ -69,7 +84,9 @@ def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
         query = query.where(Review.location_id == filters.location_id)
     if filters.platform:
         query = query.where(Review.platform == filters.platform)
-    if filters.rating:
+    if filters.ratings:
+        query = query.where(Review.rating.in_(filters.ratings))
+    elif filters.rating:
         query = query.where(Review.rating == filters.rating)
 
     date_from, date_to = resolve_date_range(filters)
@@ -148,11 +165,20 @@ def apply_review_filters(query: Select, filters: ReviewFilters) -> Select:
         )
     elif status == "handled":
         query = query.where(Review.is_handled.is_(True))
+    elif status in WORKFLOW_STATUSES:
+        query = query.where(Review.workflow_status == status)
 
     return query
 
 
 def derive_review_status(review: Review, reply: Reply | None, latest_job: Job | None = None) -> str:
+    if review.workflow_status:
+        if review.workflow_status == "handled" and review.is_handled:
+            return "handled"
+        if review.workflow_status not in {"unreplied", "suggested"}:
+            return review.workflow_status
+        if review.workflow_status == "suggested" and reply:
+            return "suggested"
     if review.is_handled:
         return "handled"
     if review.has_owner_reply:

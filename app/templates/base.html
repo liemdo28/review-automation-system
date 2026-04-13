@@ -7,38 +7,131 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="page-shell">
-        <header class="topbar panel">
-            <div class="topbar-copy">
-                <div class="brand-lockup">
-                    <div class="brand-mark">S</div>
-                    <div class="brand-copy">
-                        <span class="eyebrow">START</span>
-                        <strong class="brand-title">Restaurant Review Desk</strong>
+    <div class="app-shell">
+        <aside class="app-sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-mark">S</div>
+                <div class="brand-copy">
+                    <span class="eyebrow">START</span>
+                    <strong class="brand-title">Review Command Center</strong>
+                    <p class="text-muted">AI teammate for restaurant review ops.</p>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav" aria-label="Primary">
+                <a href="/" class="sidebar-link {% if shell_page_key == 'overview' %}is-active{% endif %}">
+                    <span>Overview</span>
+                </a>
+                <a href="/reviews" class="sidebar-link {% if shell_page_key == 'queue' %}is-active{% endif %}">
+                    <span>Review Queue</span>
+                    <strong>{{ shell_counts.queue if shell_counts else 0 }}</strong>
+                </a>
+                <a href="/auto-reply" class="sidebar-link {% if shell_page_key == 'auto_reply' %}is-active{% endif %}">
+                    <span>Auto Reply</span>
+                    <strong>{{ shell_counts.auto_eligible if shell_counts else 0 }}</strong>
+                </a>
+                <a href="/audit" class="sidebar-link {% if shell_page_key == 'audit' %}is-active{% endif %}">
+                    <span>Negative Review Audit</span>
+                    <strong>{{ shell_counts.escalated if shell_counts else 0 }}</strong>
+                </a>
+                <a href="/locations" class="sidebar-link {% if shell_page_key == 'sources' %}is-active{% endif %}">
+                    <span>Sources</span>
+                    <strong>{{ shell_counts.auth_blocked if shell_counts else 0 }}</strong>
+                </a>
+                <a href="/reports" class="sidebar-link {% if shell_page_key == 'reports' %}is-active{% endif %}">
+                    <span>Reports</span>
+                </a>
+                <a href="/admin/sources" class="sidebar-link {% if shell_page_key == 'admin' %}is-active{% endif %}">
+                    <span>Settings / Admin</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-foot panel inset-panel">
+                <p class="eyebrow">Workspace state</p>
+                <div class="sidebar-stats">
+                    <div>
+                        <span>Queue</span>
+                        <strong>{{ shell_counts.queue if shell_counts else 0 }}</strong>
+                    </div>
+                    <div>
+                        <span>Manual review</span>
+                        <strong>{{ shell_counts.manual_review if shell_counts else 0 }}</strong>
+                    </div>
+                    <div>
+                        <span>Auth blocked</span>
+                        <strong>{{ shell_counts.auth_blocked if shell_counts else 0 }}</strong>
                     </div>
                 </div>
-                <div>
-                    <h1>{% block shell_title %}Review operations, not spreadsheet triage.{% endblock %}</h1>
-                    <p class="topbar-subtitle">{% block shell_subtitle %}Monitor source health, review quality, and reply approval from one workspace built for daily restaurant ops.{% endblock %}</p>
-                </div>
             </div>
-            <div class="topbar-actions">
-                <div class="topbar-statuses">
-                    <span class="topbar-status-chip">Operator-assisted workflow</span>
-                    <span class="topbar-status-chip is-neutral">Original-language capture</span>
+        </aside>
+
+        <div class="app-stage">
+            <header class="workspace-header">
+                <div class="workspace-header-main">
+                    <div>
+                        <p class="eyebrow">AI review workspace</p>
+                        <h1>{% block shell_title %}AI teammate for review operations{% endblock %}</h1>
+                    </div>
+                    <div class="workspace-header-meta">
+                        <span class="topbar-status-chip">{{ shell_scope_label or 'All stores' }}</span>
+                        <span class="topbar-status-chip {% if shell_health_tone == 'failed' %}{% else %}is-neutral{% endif %}">{{ shell_health_label or 'Healthy' }}</span>
+                        <span class="topbar-status-chip is-neutral">Operator-assisted workflow</span>
+                    </div>
                 </div>
-                <nav class="workspace-tabs" aria-label="Primary">
-                    <a href="/" class="workspace-tab {% if request.url.path == '/' %}is-active{% endif %}">Dashboard</a>
-                    <a href="/reviews" class="workspace-tab {% if request.url.path.startswith('/reviews') %}is-active{% endif %}">Needs Attention</a>
-                    <a href="/locations" class="workspace-tab {% if request.url.path.startswith('/locations') %}is-active{% endif %}">Locations</a>
-                    <a href="/admin/sources" class="workspace-tab {% if request.url.path.startswith('/admin') %}is-active{% endif %}">Admin</a>
-                </nav>
+                <p class="topbar-subtitle">{% block shell_subtitle %}Command the queue, see AI decisions, and keep source health in view without leaving the working surface.{% endblock %}</p>
+
+                <div class="command-bar-wrap">
+                    <form class="command-bar" onsubmit="runCommandBar(event)">
+                        <input
+                            id="workspaceCommandInput"
+                            type="text"
+                            placeholder="Ask START: show me 1-star reviews from last 7 days"
+                            aria-label="AI command bar"
+                        >
+                        <button type="submit" class="btn">Run</button>
+                    </form>
+                    <div class="command-suggestions">
+                        {% for item in shell_command_suggestions or [] %}
+                        <button type="button" class="command-chip" onclick='runPresetCommand({{ item.command|tojson }})'>{{ item.label }}</button>
+                        {% endfor %}
+                    </div>
+                </div>
+            </header>
+
+            <div class="workspace-frame">
+                <main class="workspace-canvas">
+                    {% block content %}{% endblock %}
+                </main>
+                <aside class="ai-context-panel">
+                    {% block ai_panel %}
+                    <div class="panel ai-panel-card">
+                        <div class="section-head">
+                            <div>
+                                <p class="eyebrow">AI Context</p>
+                                <h2>{{ ai_context_title or 'AI workspace context' }}</h2>
+                                <p class="section-copy">{{ ai_context_summary or 'Select a task, review, or workflow to bring richer detail into this panel.' }}</p>
+                            </div>
+                        </div>
+                        <div class="ai-context-list">
+                            {% for item in ai_context_sections or [] %}
+                            <article class="ai-context-row">
+                                <span>{{ item.label }}</span>
+                                <strong>{{ item.value }}</strong>
+                            </article>
+                            {% endfor %}
+                        </div>
+                        <div class="ai-context-actions">
+                            {% for action in ai_context_actions or [] %}
+                            <a class="btn btn-secondary btn-sm" href="{{ action.href }}">{{ action.label }}</a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endblock %}
+                </aside>
             </div>
-        </header>
-        <main class="workspace-main">
-            {% block content %}{% endblock %}
-        </main>
+        </div>
     </div>
+    <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
     <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

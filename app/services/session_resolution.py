@@ -5,6 +5,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models import AuthSession, Location, ReviewSource
 
@@ -117,6 +118,77 @@ async def resolve_auth_session_for_source(
     if account_key:
         return (
             await db.execute(
+                select(AuthSession)
+                .where(
+                    and_(
+                        active_filter,
+                        AuthSession.share_scope == "account",
+                        AuthSession.shared_key == account_key,
+                    )
+                )
+                .order_by(AuthSession.last_validated_at.desc().nullslast(), AuthSession.updated_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    return None
+
+
+def resolve_auth_session_for_source_sync(
+    db: Session,
+    source: ReviewSource,
+    *,
+    location: Location | None = None,
+) -> AuthSession | None:
+    now = datetime.utcnow()
+    active_filter = and_(
+        AuthSession.platform == source.platform,
+        AuthSession.status == "active",
+        or_(AuthSession.expires_at.is_(None), AuthSession.expires_at > now),
+    )
+
+    source_session = (
+        db.execute(
+            select(AuthSession)
+            .where(
+                and_(
+                    active_filter,
+                    AuthSession.source_id == source.id,
+                    AuthSession.share_scope == "source",
+                )
+            )
+            .order_by(AuthSession.last_validated_at.desc().nullslast(), AuthSession.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if source_session:
+        return source_session
+
+    platform_key = build_shared_key(platform=source.platform, share_scope="platform")
+    platform_session = (
+        db.execute(
+            select(AuthSession)
+            .where(
+                and_(
+                    active_filter,
+                    AuthSession.share_scope == "platform",
+                    or_(AuthSession.shared_key == platform_key, AuthSession.shared_key.is_(None)),
+                )
+            )
+            .order_by(AuthSession.last_validated_at.desc().nullslast(), AuthSession.updated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if platform_session:
+        return platform_session
+
+    account_key = build_shared_key(
+        platform=source.platform,
+        share_scope="account",
+        location=location,
+    )
+    if account_key:
+        return (
+            db.execute(
                 select(AuthSession)
                 .where(
                     and_(

@@ -1,91 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - START{% endblock %}
-{% block shell_title %}Daily review operations with source health, live queue, and reply readiness.{% endblock %}
-{% block shell_subtitle %}START keeps the team on unreplied reviews, highlights auth failures early, and leaves customer language untouched from collection through approval.{% endblock %}
+{% block title %}Overview - START{% endblock %}
+{% block shell_title %}AI overview for review operations{% endblock %}
+{% block shell_subtitle %}See what needs action now, what AI can safely automate, and what is blocked before the team starts working the queue.{% endblock %}
 {% block content %}
-<section class="workspace-section section-grid">
-    <div class="panel section-hero">
+<section class="workspace-section">
+    <div class="panel ai-summary-hero">
         <div class="section-head">
             <div>
-                <p class="eyebrow">Operations Board</p>
-                <h2>What needs action right now</h2>
-                <p class="section-copy">Use this board to scan queue pressure, source readiness, and negative review volume before staff starts approvals.</p>
+                <p class="eyebrow">AI Summary</p>
+                <h2>START has {{ summary.total_unreplied_reviews }} open reviews, {{ summary.negative_reviews_needing_attention }} negative items needing attention, and {{ summary.auth_expired_jobs }} blocked sources.</h2>
+                <p class="section-copy">This is the live operations canvas: decide what to automate, what to approve manually, and what needs GM attention.</p>
             </div>
             <div class="section-actions">
-                <button class="btn" onclick="triggerFetch()">Sync All Sources</button>
-                <a href="/reviews" class="btn btn-secondary">Open Review Queue</a>
+                <a href="/auto-reply" class="btn">Run Auto Reply</a>
+                <a href="/audit" class="btn btn-secondary">Open Audit</a>
+                <button class="btn btn-secondary" onclick="triggerFetch()">Refresh Sources</button>
             </div>
         </div>
-
-        {% if summary.auth_expired_jobs > 0 %}
-        <div class="warning-strip">
-            <strong>Re-authentication needed.</strong>
-            <span>{{ summary.auth_expired_jobs }} source(s) need a refreshed authorized session before collection can continue.</span>
-            <a href="/locations" class="ghost-link">Open Sources</a>
-        </div>
-        {% endif %}
-
         <div class="metric-grid">
             <article class="metric-tile">
-                <span class="metric-label">Total unreplied</span>
-                <strong class="metric-value">{{ summary.total_unreplied_reviews }}</strong>
-            </article>
-            <article class="metric-tile accent-google">
-                <span class="metric-label">Google unreplied</span>
-                <strong class="metric-value">{{ summary.google_unreplied_reviews }}</strong>
-            </article>
-            <article class="metric-tile accent-yelp">
-                <span class="metric-label">Yelp unreplied</span>
-                <strong class="metric-value">{{ summary.yelp_unreplied_reviews }}</strong>
+                <span class="metric-label">Auto reply ready</span>
+                <strong class="metric-value">{{ shell_counts.auto_eligible }}</strong>
             </article>
             <article class="metric-tile accent-alert">
-                <span class="metric-label">Negative priority</span>
-                <strong class="metric-value">{{ summary.negative_reviews_needing_attention }}</strong>
-            </article>
-            <article class="metric-tile accent-neutral">
-                <span class="metric-label">Collected today</span>
-                <strong class="metric-value">{{ summary.reviews_collected_today }}</strong>
+                <span class="metric-label">Negative today</span>
+                <strong class="metric-value">{{ summary.negative_reviews_today }}</strong>
             </article>
             <article class="metric-tile accent-warning">
-                <span class="metric-label">Failed / auth expired</span>
-                <strong class="metric-value">{{ summary.failed_jobs }} / {{ summary.auth_expired_jobs }}</strong>
+                <span class="metric-label">Escalated</span>
+                <strong class="metric-value">{{ summary.escalated_reviews }}</strong>
             </article>
-        </div>
-    </div>
-
-    <div class="panel utility-panel">
-        <div class="section-head">
-            <div>
-                <p class="eyebrow">Source Health</p>
-                <h2>Store readiness</h2>
-            </div>
-        </div>
-        <div class="source-cluster-list">
-            {% for item in source_items %}
-            <article class="source-cluster-card">
-                <div class="source-cluster-head">
-                    <div>
-                        <h3>{{ item.location.name }}</h3>
-                        <p class="text-muted">{{ item.location.address }}</p>
-                    </div>
-                    <div class="cluster-metric">
-                        <span class="metric-label">Open queue</span>
-                        <strong>{{ item.outstanding }}</strong>
-                    </div>
-                </div>
-                <div class="source-cluster-body">
-                    {% for source in item.sources %}
-                    <div class="source-health-row">
-                        <div class="source-health-main">
-                            <span class="badge badge-{{ source.platform }}">{{ source.platform }}</span>
-                            <strong>{{ source.source_label or source.platform|title }}</strong>
-                        </div>
-                        <span class="status status-{{ source.session_status }}">{{ source.session_status.replace('_', ' ') }}</span>
-                    </div>
-                    {% endfor %}
-                </div>
+            <article class="metric-tile accent-neutral">
+                <span class="metric-label">Manual review</span>
+                <strong class="metric-value">{{ shell_counts.manual_review }}</strong>
             </article>
-            {% endfor %}
         </div>
     </div>
 </section>
@@ -94,35 +42,75 @@
     <div class="panel">
         <div class="section-head">
             <div>
-                <p class="eyebrow">Needs Attention</p>
-                <h2>Recent unreplied reviews</h2>
-                <p class="section-copy">Quick scan of the newest queue items before you open the full workspace.</p>
+                <p class="eyebrow">Suggested Next Actions</p>
+                <h2>Start where AI creates the most leverage</h2>
             </div>
-            <a href="/reviews" class="btn btn-secondary btn-sm">View Queue</a>
+        </div>
+        <div class="workspace-action-list">
+            <a href="/auto-reply" class="workspace-action-card">
+                <strong>Run Auto Reply on eligible reviews</strong>
+                <span>{{ shell_counts.auto_eligible }} reviews are ready for safe automation review.</span>
+            </a>
+            <a href="/audit" class="workspace-action-card">
+                <strong>Audit low-rated reviews</strong>
+                <span>{{ summary.negative_reviews_needing_attention }} reviews are in the negative queue.</span>
+            </a>
+            <a href="/locations" class="workspace-action-card">
+                <strong>Recover blocked sources</strong>
+                <span>{{ summary.auth_expired_jobs }} sources need fresh login before collection continues cleanly.</span>
+            </a>
+            <a href="/reports" class="workspace-action-card">
+                <strong>Generate GM report</strong>
+                <span>Summarize low-rated reviews, issue mix, and suggested actions for management.</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Automation Status</p>
+                <h2>System health and execution readiness</h2>
+            </div>
+        </div>
+        <div class="ai-context-list">
+            <article class="ai-context-row"><span>Google queue</span><strong>{{ summary.google_unreplied_reviews }}</strong></article>
+            <article class="ai-context-row"><span>Yelp queue</span><strong>{{ summary.yelp_unreplied_reviews }}</strong></article>
+            <article class="ai-context-row"><span>Collected today</span><strong>{{ summary.reviews_collected_today }}</strong></article>
+            <article class="ai-context-row"><span>Failed jobs</span><strong>{{ summary.failed_jobs }}</strong></article>
+            <article class="ai-context-row"><span>Auth blocked</span><strong>{{ shell_counts.auth_blocked }}</strong></article>
+        </div>
+    </div>
+</section>
+
+<section class="workspace-section dual-grid">
+    <div class="panel">
+        <div class="section-head">
+            <div>
+                <p class="eyebrow">Recent AI Decisions</p>
+                <h2>Queue items surfaced for action</h2>
+            </div>
+            <a href="/reviews" class="btn btn-secondary btn-sm">Open Queue</a>
         </div>
         <div class="review-preview-list">
             {% for item in recent_review_items %}
-            <a href="/reviews/{{ item.review.id }}" class="review-preview-card">
+            <a href="/reviews?focus_id={{ item.review.id }}" class="review-preview-card store-accent-card" style="{{ store_theme_style(item.location) }}">
                 <div class="review-preview-top">
                     <span class="badge badge-{{ item.review.platform }}">{{ item.review.platform }}</span>
-                    <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+                    <span class="status status-{{ item.review.workflow_status or item.status }}">{{ (item.review.workflow_status or item.status).replace('_', ' ') }}</span>
                 </div>
                 <div class="review-preview-main">
                     <h3>{{ item.review.reviewer_name or 'Anonymous' }}</h3>
-                    <p class="review-preview-meta">{{ item.location.name if item.location else 'Unknown location' }} · {{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</p>
+                    <p class="review-preview-meta"><span class="store-chip" style="{{ store_theme_style(item.location) }}">{{ item.location.name if item.location else 'Unknown location' }}</span> · {{ item.review.review_date.strftime('%m/%d/%Y') if item.review.review_date else 'No date' }}</p>
                     <div class="star-rating" aria-label="{{ item.review.rating }} out of 5 stars">
-                        {% for _ in range(item.review.rating) %}
-                        <span class="star filled">&#9733;</span>
-                        {% endfor %}
-                        {% for _ in range(5 - item.review.rating) %}
-                        <span class="star">&#9733;</span>
-                        {% endfor %}
+                        {% for _ in range(item.review.rating) %}<span class="star filled">&#9733;</span>{% endfor %}
+                        {% for _ in range(5 - item.review.rating) %}<span class="star">&#9733;</span>{% endfor %}
                     </div>
-                    <p class="review-preview-copy">{{ item.review.review_text or 'No written comment provided.' }}</p>
+                    <p class="review-preview-copy">{{ item.review.auto_reply_decision_reason or item.review.review_text or 'No written comment provided.' }}</p>
                 </div>
             </a>
             {% else %}
-            <p class="empty-state">No unreplied reviews are currently waiting in the default queue.</p>
+            <p class="empty-state">No unreplied reviews are currently waiting in the queue.</p>
             {% endfor %}
         </div>
     </div>
@@ -130,9 +118,8 @@
     <div class="panel">
         <div class="section-head">
             <div>
-                <p class="eyebrow">Execution</p>
-                <h2>Recent jobs</h2>
-                <p class="section-copy">Background sync and reply-generation activity for the latest run cycle.</p>
+                <p class="eyebrow">Execution Events</p>
+                <h2>Recent sync and reply jobs</h2>
             </div>
         </div>
         <div class="job-list">

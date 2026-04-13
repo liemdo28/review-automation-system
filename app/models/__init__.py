@@ -7,8 +7,10 @@ from app.models.email_alert import EmailAlert
 from app.models.review_source import ReviewSource
 from app.models.auth_session import AuthSession
 from app.models.reply_suggestion import ReplySuggestion
+from app.models.app_setting import AppSetting
 
 __all__ = [
+    "AppSetting",
     "AuthSession",
     "EmailAlert",
     "FetchLog",
