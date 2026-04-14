@@ -151,7 +151,7 @@ function updateAutoReplyStatusPill(reviewId, label, statusClass) {
     pill.className = `status ${statusClass} auto-reply-status-pill`;
 }
 
-function mapJobStateToStatus(jobStatus, workflowStatus) {
+function mapJobStateToStatus(jobStatus, workflowStatus, jobPhase) {
     if (workflowStatus === "posted") {
         return { label: "posted", statusClass: "status-posted" };
     }
@@ -167,11 +167,20 @@ function mapJobStateToStatus(jobStatus, workflowStatus) {
     if (workflowStatus === "blocked_auth") {
         return { label: "auth required", statusClass: "status-blocked_auth" };
     }
+    if (jobPhase === "opening_browser") {
+        return { label: "opening browser", statusClass: "status-processing" };
+    }
+    if (jobPhase === "locating_review") {
+        return { label: "locating review", statusClass: "status-processing" };
+    }
+    if (jobPhase === "posting_reply") {
+        return { label: "posting reply", statusClass: "status-processing" };
+    }
     if (jobStatus === "processing") {
         return { label: "opening browser", statusClass: "status-processing" };
     }
     if (jobStatus === "queued") {
-        return { label: "waiting", statusClass: "status-queued" };
+        return { label: "queued", statusClass: "status-queued" };
     }
     if (jobStatus === "failed") {
         return { label: "failed", statusClass: "status-failed" };
@@ -179,7 +188,7 @@ function mapJobStateToStatus(jobStatus, workflowStatus) {
     if (jobStatus === "completed") {
         return { label: "posted", statusClass: "status-posted" };
     }
-    return { label: "waiting", statusClass: "status-queued" };
+    return { label: "queued", statusClass: "status-queued" };
 }
 
 async function fetchReviewJobStatus(reviewId) {
@@ -193,6 +202,7 @@ async function fetchReviewJobStatus(reviewId) {
     const workflowStatus = (data.review && data.review.workflow_status) || data.review_status;
     return {
         jobStatus: postJob ? postJob.status : null,
+        jobPhase: postJob && postJob.result ? postJob.result.phase : null,
         workflowStatus: workflowStatus || null,
         review: data.review || {},
     };
@@ -200,8 +210,8 @@ async function fetchReviewJobStatus(reviewId) {
 
 function renderAutoReplyPendingState(reviewId, state) {
     if (!state) return;
-    const { jobStatus, workflowStatus } = state;
-    const mapped = mapJobStateToStatus(jobStatus, workflowStatus);
+    const { jobStatus, workflowStatus, jobPhase } = state;
+    const mapped = mapJobStateToStatus(jobStatus, workflowStatus, jobPhase);
     updateAutoReplyStatusPill(reviewId, mapped.label, mapped.statusClass);
 }
 
@@ -224,7 +234,7 @@ function renderAutoReplyQueuePanel(states) {
         row.className = "ai-context-row";
         const name = entry.review.reviewer_name || "Anonymous";
         const store = entry.review.store || "-";
-        const status = mapJobStateToStatus(entry.jobStatus, entry.workflowStatus);
+        const status = mapJobStateToStatus(entry.jobStatus, entry.workflowStatus, entry.jobPhase);
         row.innerHTML = `<span>${name}</span><strong>${status.label}</strong><small>${store}</small>`;
         list.appendChild(row);
     });
@@ -235,7 +245,7 @@ function startAutoReplyStatusPolling() {
     if (!pendingIds.length) return;
 
     const remaining = new Set(pendingIds);
-    pendingIds.forEach((id) => updateAutoReplyStatusPill(id, "waiting", "status-queued"));
+    pendingIds.forEach((id) => updateAutoReplyStatusPill(id, "queued", "status-queued"));
 
     let attempts = 0;
     const maxAttempts = 45;
@@ -443,7 +453,11 @@ async function previewBulkAutoReplyUI() {
         renderPreviewList(
             "autoReplyBlockedList",
             data.blocked_reviews || [],
-            (item) => `${item.store || "Unknown store"} · ${item.reviewer_name || "Anonymous"} · ${item.reason}`,
+            (item) => {
+                const label = item.reason_label || item.reason || "Blocked";
+                const detail = item.reason_detail ? ` (${item.reason_detail})` : "";
+                return `${item.store || "Unknown store"} · ${item.reviewer_name || "Anonymous"} · ${label}${detail}`;
+            },
         );
         if (panel) panel.classList.remove("is-hidden");
     } catch (error) {

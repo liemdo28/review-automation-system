@@ -9,7 +9,7 @@ from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
@@ -42,9 +42,68 @@ from app.services.session_resolution import (
 from app.services.source_groups import propagate_group_resolved_url
 from app.services.review_views import count_review_listing, fetch_review_listing
 from app.workers.fetch_worker import fetch_all_reviews
+from app.workers.process_worker import process_queued_jobs
 
 router = APIRouter(tags=["api"])
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _enqueue_job_processing(background_tasks: BackgroundTasks | None) -> None:
+    if not background_tasks:
+        return
+    background_tasks.add_task(process_queued_jobs)
+
+
+def _blocked_reason_label(code: str | None) -> str:
+    mapping = {
+        "no_session": "Login required",
+        "dry_run": "Dry run active",
+        "policy_blocked": "Policy blocked",
+        "already_replied": "Already handled",
+        "missing_reply": "Draft missing",
+        "auto_post_disabled": "Auto post disabled",
+        "platform_not_live": "Platform not live",
+        "not_found": "Review missing",
+        "blocked": "Blocked",
+    }
+    return mapping.get(code or "", "Blocked")
+
+
+def _blocked_reason_payload(
+    *,
+    review_id: int,
+    code: str,
+    label: str,
+    detail: str,
+    reviewer_name: str | None = None,
+    store: str | None = None,
+    platform: str | None = None,
+    rating: int | None = None,
+    decision_reason: str | None = None,
+    risk_level: str | None = None,
+    workflow_status: str | None = None,
+) -> dict:
+    payload = {
+        "review_id": review_id,
+        "reason": label,
+        "reason_code": code,
+        "reason_detail": detail,
+    }
+    if reviewer_name:
+        payload["reviewer_name"] = reviewer_name
+    if store:
+        payload["store"] = store
+    if platform:
+        payload["platform"] = platform
+    if rating is not None:
+        payload["rating"] = rating
+    if decision_reason:
+        payload["decision_reason"] = decision_reason
+    if risk_level:
+        payload["risk_level"] = risk_level
+    if workflow_status:
+        payload["workflow_status"] = workflow_status
+    return payload
 
 
 class BulkReviewAction(BaseModel):
@@ -286,7 +345,14 @@ async def _build_bulk_auto_reply_preview(
     for review_id in selected_ids:
         review = await db.get(Review, review_id)
         if not review:
-            blocked_reviews.append({"review_id": review_id, "reason": "Review not found."})
+            blocked_reviews.append(
+                _blocked_reason_payload(
+                    review_id=review_id,
+                    code="not_found",
+                    label="Review missing",
+                    detail="Review not found.",
+                )
+            )
             continue
 
         location = await db.get(Location, review.location_id)
@@ -296,34 +362,40 @@ async def _build_bulk_auto_reply_preview(
 
         if not reply or not (reply.ai_reply_text or "").strip():
             blocked_reviews.append(
-                {
-                    "review_id": review.id,
-                    "reviewer_name": review.reviewer_name,
-                    "store": location.name if location else None,
-                    "reason": "No prepared reply is available yet.",
-                }
+                _blocked_reason_payload(
+                    review_id=review.id,
+                    code="missing_reply",
+                    label="Draft missing",
+                    detail="No prepared reply is available yet.",
+                    reviewer_name=review.reviewer_name,
+                    store=location.name if location else None,
+                )
             )
             continue
 
         if review.has_owner_reply or reply.status == "posted":
             blocked_reviews.append(
-                {
-                    "review_id": review.id,
-                    "reviewer_name": review.reviewer_name,
-                    "store": location.name if location else None,
-                    "reason": "Owner reply is already visible for this review.",
-                }
+                _blocked_reason_payload(
+                    review_id=review.id,
+                    code="already_replied",
+                    label="Already handled",
+                    detail="Owner reply is already visible for this review.",
+                    reviewer_name=review.reviewer_name,
+                    store=location.name if location else None,
+                )
             )
             continue
 
         if source and source.session_status in {"reauth_required", "failed", "expired", "blocked"}:
             blocked_reviews.append(
-                {
-                    "review_id": review.id,
-                    "reviewer_name": review.reviewer_name,
-                    "store": location.name if location else None,
-                    "reason": "Source session needs login before posting can continue.",
-                }
+                _blocked_reason_payload(
+                    review_id=review.id,
+                    code="no_session",
+                    label="Login required",
+                    detail="Source session needs login before posting can continue.",
+                    reviewer_name=review.reviewer_name,
+                    store=location.name if location else None,
+                )
             )
             continue
 
@@ -341,14 +413,19 @@ async def _build_bulk_auto_reply_preview(
         )
 
         blocked_reason = None
+        blocked_reason_code = None
         if not decision.allow_auto_post:
             blocked_reason = decision.decision_reason
+            blocked_reason_code = "policy_blocked"
         elif not config.get("auto_post_phase_enabled", False):
             blocked_reason = "Auto-post phase is disabled in this environment."
+            blocked_reason_code = "auto_post_disabled"
         elif settings.dry_run:
             blocked_reason = "DRY_RUN is enabled, so live auto reply is blocked."
+            blocked_reason_code = "dry_run"
         elif not _direct_source_posting_available(platform=review.platform):
             blocked_reason = f"{review.platform.title()} auto reply is not live yet."
+            blocked_reason_code = "platform_not_live"
 
         item = {
             "review_id": review.id,
@@ -361,7 +438,21 @@ async def _build_bulk_auto_reply_preview(
             "workflow_status": decision.workflow_status,
         }
         if blocked_reason:
-            blocked_reviews.append({**item, "reason": blocked_reason})
+            blocked_reviews.append(
+                _blocked_reason_payload(
+                    review_id=item["review_id"],
+                    code=blocked_reason_code or "blocked",
+                    label=_blocked_reason_label(blocked_reason_code),
+                    detail=blocked_reason,
+                    reviewer_name=item.get("reviewer_name"),
+                    store=item.get("store"),
+                    platform=item.get("platform"),
+                    rating=item.get("rating"),
+                    decision_reason=item.get("decision_reason"),
+                    risk_level=item.get("risk_level"),
+                    workflow_status=item.get("workflow_status"),
+                )
+            )
         else:
             eligible_reviews.append(item)
 
@@ -784,7 +875,11 @@ async def bulk_auto_reply_preview(payload: BulkAutoReplyStartPayload, db: AsyncS
     return await _build_bulk_auto_reply_preview(db, review_ids=payload.review_ids)
 
 
-async def _bulk_auto_reply_ui(payload: BulkAutoReplyStartPayload, db: AsyncSession) -> dict:
+async def _bulk_auto_reply_ui(
+    payload: BulkAutoReplyStartPayload,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
     if not payload.review_ids:
         raise HTTPException(400, "No reviews selected")
 
@@ -795,28 +890,45 @@ async def _bulk_auto_reply_ui(payload: BulkAutoReplyStartPayload, db: AsyncSessi
     for item in preview["eligible_reviews"]:
         review = await db.get(Review, item["review_id"])
         if not review:
-            blocked_reviews.append({"review_id": item["review_id"], "reason": "Review not found while queueing."})
+            blocked_reviews.append(
+                _blocked_reason_payload(
+                    review_id=item["review_id"],
+                    code="not_found",
+                    label="Review missing",
+                    detail="Review not found while queueing.",
+                )
+            )
             continue
         reply = (await db.execute(select(Reply).where(Reply.review_id == review.id))).scalar_one_or_none()
         if not reply:
-            blocked_reviews.append({"review_id": review.id, "reason": "Prepared reply missing while queueing."})
+            blocked_reviews.append(
+                _blocked_reason_payload(
+                    review_id=review.id,
+                    code="missing_reply",
+                    label="Draft missing",
+                    detail="Prepared reply missing while queueing.",
+                )
+            )
             continue
         location = await db.get(Location, review.location_id)
         try:
             job = await _queue_ui_posting_job(db, review=review, reply=reply, location=location)
         except HTTPException as exc:
             blocked_reviews.append(
-                {
-                    "review_id": review.id,
-                    "reviewer_name": review.reviewer_name,
-                    "store": location.name if location else None,
-                    "reason": exc.detail,
-                }
+                _blocked_reason_payload(
+                    review_id=review.id,
+                    code="blocked",
+                    label=_blocked_reason_label("blocked"),
+                    detail=str(exc.detail),
+                    reviewer_name=review.reviewer_name,
+                    store=location.name if location else None,
+                )
             )
             continue
         queued_jobs.append({"review_id": review.id, "job_id": job.id})
 
     await db.commit()
+    _enqueue_job_processing(background_tasks)
     return {
         "status": "queued",
         "selected_count": preview["selected_count"],
@@ -835,8 +947,12 @@ async def bulk_auto_reply_start(payload: BulkAutoReplyStartPayload, db: AsyncSes
 
 
 @router.post("/reviews/bulk/auto-reply-ui")
-async def bulk_auto_reply_ui(payload: BulkAutoReplyStartPayload, db: AsyncSession = Depends(get_db)):
-    return await _bulk_auto_reply_ui(payload, db)
+async def bulk_auto_reply_ui(
+    payload: BulkAutoReplyStartPayload,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _bulk_auto_reply_ui(payload, db, background_tasks)
 
 
 @router.get("/reviews/export/selected.csv")
@@ -1087,7 +1203,11 @@ async def mark_review_manual(review_id: int, db: AsyncSession = Depends(get_db))
     return {"status": "ok", "workflow_status": review.workflow_status}
 
 
-async def _queue_single_auto_reply_ui(review_id: int, db: AsyncSession) -> dict:
+async def _queue_single_auto_reply_ui(
+    review_id: int,
+    db: AsyncSession,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict:
     review = await db.get(Review, review_id)
     if not review:
         raise HTTPException(404, "Review not found")
@@ -1098,17 +1218,26 @@ async def _queue_single_auto_reply_ui(review_id: int, db: AsyncSession) -> dict:
     location = await db.get(Location, review.location_id)
     job = await _queue_ui_posting_job(db, review=review, reply=reply, location=location)
     await db.commit()
+    _enqueue_job_processing(background_tasks)
     return {"status": "queued", "job_id": job.id, "mode": "ui_fallback"}
 
 
 @router.post("/reviews/{review_id}/retry-auto-post")
-async def retry_auto_post(review_id: int, db: AsyncSession = Depends(get_db)):
-    return await _queue_single_auto_reply_ui(review_id, db)
+async def retry_auto_post(
+    review_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _queue_single_auto_reply_ui(review_id, db, background_tasks)
 
 
 @router.post("/reviews/{review_id}/auto-reply-ui")
-async def auto_reply_ui(review_id: int, db: AsyncSession = Depends(get_db)):
-    return await _queue_single_auto_reply_ui(review_id, db)
+async def auto_reply_ui(
+    review_id: int,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _queue_single_auto_reply_ui(review_id, db, background_tasks)
 
 
 @router.get("/admin/auto-reply-config")

@@ -25,6 +25,7 @@ def task_post_ui_reply(job_id: int):
 
         job.status = "processing"
         job.started_at = datetime.utcnow()
+        job.result = {**(job.result or {}), "phase": "opening_browser", "phase_at": datetime.utcnow().isoformat()}
         session.commit()
 
         reply_id = (job.payload or {}).get("reply_id")
@@ -80,6 +81,16 @@ def task_post_ui_reply(job_id: int):
         auth_session = resolve_auth_session_for_source_sync(session, source, location=location)
         setattr(source, "expected_store_name", location.name)
         provider = get_provider(source, auth_session=auth_session)
+
+        def _update_phase(phase: str) -> None:
+            job.result = {
+                **(job.result or {}),
+                "phase": phase,
+                "phase_at": datetime.utcnow().isoformat(),
+            }
+            session.commit()
+
+        provider.set_progress_callback(_update_phase)
 
         logger.info("[AUTO-REPLY] Launching browser for review %s (%s)", review.id, location.name)
 

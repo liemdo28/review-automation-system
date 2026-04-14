@@ -142,6 +142,7 @@ class GoogleReviewsPortalProvider(PageReviewProvider):
         from playwright.async_api import async_playwright
 
         async with async_playwright() as playwright:
+            self._emit_progress("opening_browser")
             browser = await playwright.chromium.launch(
                 headless=settings.ui_posting_headless,
                 **self._browser_launch_kwargs(),
@@ -199,6 +200,7 @@ class GoogleReviewsPortalProvider(PageReviewProvider):
 
                 await self._open_reply_to_reviews(page, review.id, attempt_log)
                 await self._focus_unreplied_tab(page)
+                self._emit_progress("locating_review")
                 card, match_result = await self._find_review_card(page, review)
                 if not card:
                     await self._focus_all_tab(page)
@@ -265,6 +267,7 @@ class GoogleReviewsPortalProvider(PageReviewProvider):
                         details=details,
                     )
 
+                self._emit_progress("posting_reply")
                 await self._fill_reply_editor(editor, reply_text)
                 if not await self._validate_editor_text(editor, reply_text):
                     await self._fill_reply_editor(editor, reply_text)

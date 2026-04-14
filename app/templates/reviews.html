@@ -41,7 +41,7 @@
         <a class="btn btn-sm" href="/reviews/{{ focus_review.id }}">Open Detail</a>
         <button class="btn btn-secondary btn-sm" onclick="evaluateAutoReply({{ focus_review.id }})">Evaluate</button>
         {% if focus_reply %}
-        <button class="btn btn-secondary btn-sm" onclick="approveReply({{ focus_review.id }})">Approve (Manual)</button>
+        <button class="btn btn-secondary btn-sm" onclick="approveReply({{ focus_review.id }})">Approve (Manual Portal)</button>
         {% endif %}
         {% if focus_source %}
         <a class="btn btn-secondary btn-sm" href="{{ focus_source.resolved_source_url or focus_source.source_url }}" target="_blank" rel="noreferrer">Open Source</a>
@@ -103,6 +103,18 @@
 {% endblock %}
 
 {% block content %}
+{% if dry_run %}
+<section class="workspace-section">
+    <div class="panel pause-banner">
+        <div>
+            <p class="eyebrow">Dry run mode</p>
+            <h2>Auto Reply will not post while dry run is active</h2>
+            <p class="section-copy">Turn off DRY_RUN in config to enable live browser posting.</p>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 {% if global_auto_reply_config and not global_auto_reply_config.auto_post_phase_enabled %}
 <section class="workspace-section">
     <div class="panel pause-banner">
@@ -157,7 +169,7 @@
                 <strong id="bulkActionSummary">0 reviews selected</strong>
             </div>
             <div class="selection-toolbar-actions">
-                <button type="button" class="btn btn-sm" onclick="previewBulkAutoReplyUI()">Auto Reply</button>
+                <button type="button" class="btn btn-sm" onclick="previewBulkAutoReplyUI()" {% if dry_run %}disabled title="Dry run mode is active."{% endif %}>Auto Reply (Browser)</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="bulkRegenerate()">Regenerate</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="bulkExport()">Export</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="bulkMarkHandled()">Mark handled</button>
@@ -248,7 +260,7 @@
                 <h3 id="autoReplyPreviewTitle">Preview selected reviews</h3>
             </div>
             <div class="selection-toolbar-actions">
-                <button type="button" class="btn btn-sm" id="confirmAutoReplyButton" onclick="bulkAutoReplyUI()">Confirm Auto Reply</button>
+                <button type="button" class="btn btn-sm" id="confirmAutoReplyButton" onclick="bulkAutoReplyUI()" {% if dry_run %}disabled title="Dry run mode is active."{% endif %}>Confirm Auto Reply (Browser)</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="hideAutoReplyPreview()">Close</button>
             </div>
         </div>
@@ -369,7 +381,7 @@
                 {% if dry_run or not item.review.auto_reply_eligible or not item.source or item.source.session_status != "active" %}disabled{% endif %}
                     title="{% if dry_run %}Dry run mode is active.{% elif not item.review.auto_reply_eligible %}Review is not auto-post eligible.{% elif not item.source or item.source.session_status != 'active' %}Google session must be active before UI posting.{% else %}Start browser UI posting for this review.{% endif %}"
                 >
-                    Auto Reply
+                    Auto Reply (Browser)
                 </button>
                 {% endif %}
                 <button type="button" class="btn btn-secondary btn-sm" onclick="markSingleHandled({{ item.review.id }})">Mark Handled</button>

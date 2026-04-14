@@ -76,6 +76,18 @@ class ReviewProvider(ABC):
         self.source = source
         self.auth_session = auth_session
         self.settings = source.settings or {}
+        self.progress_callback = None
+
+    def set_progress_callback(self, callback) -> None:
+        self.progress_callback = callback
+
+    def _emit_progress(self, phase: str) -> None:
+        if not self.progress_callback:
+            return
+        try:
+            self.progress_callback(phase)
+        except Exception:
+            pass
 
     @abstractmethod
     async def validate_session(self) -> tuple[bool, str]:

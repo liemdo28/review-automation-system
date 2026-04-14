@@ -24,7 +24,7 @@
                 <p class="section-copy">Use this workspace to run safe review batches only when sessions, policy, and tone settings are all aligned.</p>
             </div>
             <div class="section-actions">
-                <button class="btn" onclick="triggerFetch()">Run now</button>
+                <button class="btn" onclick="triggerFetch()" {% if dry_run %}disabled title="Dry run mode is active."{% endif %}>Run now</button>
                 <a href="/admin/auto-reply" class="btn btn-secondary">Open policy settings</a>
                 <a href="/reviews?status=auto_post_failed" class="btn btn-secondary">Retry failed</a>
             </div>
