@@ -27,15 +27,17 @@ try {
 
     Write-Host "Ensuring PostgreSQL + Redis are running..."
     $dockerAvailable = $false
+    $dockerError = $null
     try {
         docker version | Out-Null
         $dockerAvailable = $true
     } catch {
+        $dockerError = $_ | Out-String
         $dockerAvailable = $false
     }
 
     if (-not $dockerAvailable) {
-        throw "Docker Desktop is not running. Start Docker Desktop and re-run fix-and-start."
+        throw "Docker Desktop is not running. Start Docker Desktop and re-run fix-and-start.`n$dockerError"
     }
 
     docker compose up -d postgres redis | Out-Null
