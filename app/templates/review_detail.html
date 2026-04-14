@@ -86,7 +86,10 @@
             <div><span>Risk flags</span><strong>{{ (reply.risk_flags or [])|join(', ') or '-' }}</strong></div>
         </div>
         <div class="info-strip">
-            {% if source and source.platform == "google" %}
+            {% if dry_run %}
+            <strong>Dry run is enabled.</strong>
+            <span>Live browser posting is disabled until DRY_RUN is turned off.</span>
+            {% elif source and source.platform == "google" %}
             <strong>Google UI posting fallback is available.</strong>
             <span>When the review is eligible, auto-post is enabled, and the Google session is healthy, START can open the Google review UI, paste the prepared reply, submit it, verify success, and then continue to the next queued item.</span>
             {% else %}

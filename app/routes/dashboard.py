@@ -687,6 +687,7 @@ async def auto_reply_workspace(request: Request, db: AsyncSession = Depends(get_
             "blocked_items": blocked_items,
             "failed_items": failed_items,
             "global_config": global_config,
+            "dry_run": settings.dry_run,
             "healthy_sources": healthy_sources,
             "paused_sources": paused_sources,
             "store_theme": store_theme_for_location,

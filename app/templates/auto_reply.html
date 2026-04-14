@@ -3,6 +3,18 @@
 {% block shell_title %}Auto Reply workspace{% endblock %}
 {% block shell_subtitle %}Review safe candidates, blocked dependencies, and recent failures before running automation across the queue.{% endblock %}
 {% block content %}
+{% if dry_run %}
+<section class="workspace-section">
+    <div class="panel pause-banner">
+        <div>
+            <p class="eyebrow">Dry run</p>
+            <h2>Auto Reply is running in dry-run mode</h2>
+            <p class="section-copy">Live browser posting is disabled. Turn off DRY_RUN to enable automation.</p>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 <section class="workspace-section">
     <div class="panel ai-summary-hero">
         <div class="section-head">
