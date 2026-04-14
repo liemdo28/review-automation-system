@@ -101,6 +101,18 @@
 {% endblock %}
 
 {% block content %}
+{% if global_auto_reply_config and not global_auto_reply_config.auto_post_phase_enabled %}
+<section class="workspace-section">
+    <div class="panel pause-banner">
+        <div>
+            <p class="eyebrow">Automation paused</p>
+            <h2>Auto Reply is currently paused</h2>
+            <p class="section-copy">Reviews will stay queued for manual handling until Auto Reply is resumed.</p>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 <section class="workspace-section">
     <div class="panel sticky-tool-panel">
         <div class="section-head">
