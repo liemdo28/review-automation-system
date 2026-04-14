@@ -194,6 +194,7 @@ async function fetchReviewJobStatus(reviewId) {
     return {
         jobStatus: postJob ? postJob.status : null,
         workflowStatus: workflowStatus || null,
+        review: data.review || {},
     };
 }
 
@@ -202,6 +203,31 @@ function renderAutoReplyPendingState(reviewId, state) {
     const { jobStatus, workflowStatus } = state;
     const mapped = mapJobStateToStatus(jobStatus, workflowStatus);
     updateAutoReplyStatusPill(reviewId, mapped.label, mapped.statusClass);
+}
+
+function renderAutoReplyQueuePanel(states) {
+    const panel = document.getElementById("autoReplyQueuePanel");
+    const list = document.getElementById("autoReplyQueueList");
+    if (!panel || !list) return;
+
+    const entries = states.filter((item) => item && item.review);
+    if (!entries.length) {
+        panel.classList.add("is-hidden");
+        list.innerHTML = "";
+        return;
+    }
+
+    panel.classList.remove("is-hidden");
+    list.innerHTML = "";
+    entries.forEach((entry) => {
+        const row = document.createElement("article");
+        row.className = "ai-context-row";
+        const name = entry.review.reviewer_name || "Anonymous";
+        const store = entry.review.store || "-";
+        const status = mapJobStateToStatus(entry.jobStatus, entry.workflowStatus);
+        row.innerHTML = `<span>${name}</span><strong>${status.label}</strong><small>${store}</small>`;
+        list.appendChild(row);
+    });
 }
 
 function startAutoReplyStatusPolling() {
@@ -216,7 +242,7 @@ function startAutoReplyStatusPolling() {
     const interval = window.setInterval(async () => {
         attempts += 1;
         const ids = Array.from(remaining);
-        await Promise.all(
+        const results = await Promise.all(
             ids.map(async (reviewId) => {
                 try {
                     const state = await fetchReviewJobStatus(reviewId);
@@ -224,11 +250,14 @@ function startAutoReplyStatusPolling() {
                     if (state.workflowStatus === "posted" || state.jobStatus === "failed") {
                         remaining.delete(reviewId);
                     }
+                    return { reviewId, ...state };
                 } catch (error) {
                     // keep polling; transient failures happen during reloads
+                    return null;
                 }
             }),
         );
+        renderAutoReplyQueuePanel(results.filter(Boolean));
         if (!remaining.size || attempts >= maxAttempts) {
             window.clearInterval(interval);
             storeAutoReplyPendingIds(Array.from(remaining));

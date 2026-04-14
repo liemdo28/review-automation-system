@@ -59,6 +59,17 @@
         <a class="btn btn-secondary btn-sm" href="/audit">Audit workspace</a>
     </div>
     {% endif %}
+
+    <div class="ai-context-panel is-hidden" id="autoReplyQueuePanel">
+        <div class="section-head compact">
+            <div>
+                <p class="eyebrow">Auto Reply Status</p>
+                <h3>Live posting queue</h3>
+                <p class="section-copy">Browser posting is running for the items below.</p>
+            </div>
+        </div>
+        <div class="ai-context-list" id="autoReplyQueueList"></div>
+    </div>
 </div>
 {% endblock %}
 
