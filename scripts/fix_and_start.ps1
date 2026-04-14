@@ -25,6 +25,22 @@ try {
     Write-Host "Pulling latest code..."
     git pull --ff-only origin master
 
+    Write-Host "Ensuring PostgreSQL + Redis are running..."
+    $dockerAvailable = $false
+    try {
+        docker version | Out-Null
+        $dockerAvailable = $true
+    } catch {
+        $dockerAvailable = $false
+    }
+
+    if (-not $dockerAvailable) {
+        throw "Docker Desktop is not running. Start Docker Desktop and re-run fix-and-start."
+    }
+
+    docker compose up -d postgres redis | Out-Null
+    Start-Sleep -Seconds 4
+
     $venvDir = Join-Path $repoRoot ".venv"
     $pythonExe = Join-Path $venvDir "Scripts\\python.exe"
     $alembicExe = Join-Path $venvDir "Scripts\\alembic.exe"
