@@ -66,7 +66,7 @@ async function approveReply(reviewId) {
         const resp = await fetch(`/api/reviews/${reviewId}/approve`, { method: "POST" });
         const data = await resp.json();
         if (data.status === "queued") {
-            showToast("Reply approved in START. Staff still need to post it on the source page.", "success");
+            showToast("Reply approved for manual posting (no automation).", "success");
             location.reload();
         }
     } catch (error) {
@@ -286,7 +286,7 @@ async function bulkAutoReplyUI() {
             throw new Error(data.detail || "Failed to start UI auto reply.");
         }
         showToast(
-            `UI posting job started for ${data.queued_count} review${data.queued_count === 1 ? "" : "s"}. START will open Google with the saved session and post one review at a time.`,
+            `Auto Reply started for ${data.queued_count} review${data.queued_count === 1 ? "" : "s"}. Browser posting will run sequentially.`,
             "success",
         );
         hideAutoReplyPreview();
@@ -460,7 +460,10 @@ async function autoReplyUI(reviewId) {
         if (!resp.ok) {
             throw new Error(data.detail || "Failed to start UI posting.");
         }
-        showToast("UI posting job started. Browser posting is running with the saved Google session.", "success");
+        showToast("Auto Reply started. Waiting for job queue...", "success");
+        window.setTimeout(() => {
+            showToast("Opening browser to post the reply...", "info");
+        }, 1200);
         location.reload();
     } catch (error) {
         showToast("Failed to start UI posting: " + error.message, "error");

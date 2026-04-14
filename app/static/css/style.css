@@ -1393,6 +1393,7 @@ h3 {
 }
 
 .status-active,
+.status-auto_post_eligible,
 .status-posted,
 .status-replied {
     color: var(--green);
@@ -1403,6 +1404,7 @@ h3 {
 .status-pending_review,
 .status-pending,
 .status-approved,
+.status-manual_review_required,
 .status-suggested,
 .status-email_sent,
 .status-queued,
@@ -1412,10 +1414,18 @@ h3 {
 }
 
 .status-failed,
+.status-auto_post_failed,
+.status-post_verification_required,
+.status-blocked_auth,
 .status-reauth_required,
 .status-expired {
     color: var(--red);
     background: rgba(255, 75, 66, 0.14);
+}
+
+.status-posting_in_ui {
+    color: var(--cool);
+    background: rgba(97, 214, 255, 0.12);
 }
 
 .status-handled {

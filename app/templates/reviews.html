@@ -41,7 +41,7 @@
         <a class="btn btn-sm" href="/reviews/{{ focus_review.id }}">Open Detail</a>
         <button class="btn btn-secondary btn-sm" onclick="evaluateAutoReply({{ focus_review.id }})">Evaluate</button>
         {% if focus_reply %}
-        <button class="btn btn-secondary btn-sm" onclick="approveReply({{ focus_review.id }})">Approve</button>
+        <button class="btn btn-secondary btn-sm" onclick="approveReply({{ focus_review.id }})">Approve (Manual)</button>
         {% endif %}
         {% if focus_source %}
         <a class="btn btn-secondary btn-sm" href="{{ focus_source.resolved_source_url or focus_source.source_url }}" target="_blank" rel="noreferrer">Open Source</a>
@@ -238,6 +238,9 @@
                     </div>
                     <div class="review-row-statuses">
                         <span class="status status-{{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+                        {% if item.review.workflow_status and item.review.workflow_status not in [item.status, 'unreplied'] %}
+                        <span class="status status-{{ item.review.workflow_status }}">{{ item.review.workflow_status.replace('_', ' ') }}</span>
+                        {% endif %}
                         {% if item.review.auto_reply_eligible %}
                         <span class="status status-posted">auto eligible</span>
                         {% endif %}
@@ -298,6 +301,17 @@
                 <a href="{{ request.url.path }}?{% if page_query %}{{ page_query }}&{% endif %}focus_id={{ item.review.id }}" class="btn btn-secondary btn-sm">Inspect</a>
                 <a href="/reviews/{{ item.review.id }}" class="btn btn-secondary btn-sm">Open Detail</a>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="evaluateAutoReply({{ item.review.id }})">Evaluate</button>
+                {% if item.review.platform == "google" %}
+                <button
+                    type="button"
+                    class="btn btn-sm"
+                    onclick="autoReplyUI({{ item.review.id }})"
+                    {% if not item.review.auto_reply_eligible or not item.source or item.source.session_status != "active" %}disabled{% endif %}
+                    title="{% if not item.review.auto_reply_eligible %}Review is not auto-post eligible.{% elif not item.source or item.source.session_status != 'active' %}Google session must be active before UI posting.{% else %}Start browser UI posting for this review.{% endif %}"
+                >
+                    Auto Reply
+                </button>
+                {% endif %}
                 <button type="button" class="btn btn-secondary btn-sm" onclick="markSingleHandled({{ item.review.id }})">Mark Handled</button>
             </div>
         </article>

@@ -95,7 +95,7 @@
             {% endif %}
         </div>
         <div class="section-actions">
-            <button class="btn" onclick="approveReply({{ review.id }})">Approve</button>
+            <button class="btn" onclick="approveReply({{ review.id }})">Approve (Manual Portal)</button>
             <button class="btn btn-secondary" onclick="regenerateReply({{ review.id }})">Regenerate</button>
             <button class="btn btn-secondary" onclick="evaluateAutoReply({{ review.id }})">Evaluate Auto Reply</button>
             {% if source and source.platform == "google" %}
@@ -105,7 +105,7 @@
                 {% if dry_run or not review.auto_reply_eligible or not auto_reply_config.auto_post_phase_enabled or source.session_status != "active" %}disabled{% endif %}
                 title="{% if dry_run %}DRY_RUN is enabled. Turn it off before live auto posting.{% elif not auto_reply_config.auto_post_phase_enabled %}Enable Google auto-post in Auto Reply settings first.{% elif source.session_status != "active" %}Google session must be active before UI posting.{% elif not review.auto_reply_eligible %}This review is not currently eligible for auto posting.{% else %}Use the Google UI fallback to post this reply automatically.{% endif %}"
             >
-                Auto Reply via Google UI
+                Auto Reply (UI)
             </button>
             {% else %}
             <button class="btn btn-secondary" type="button" disabled title="Direct source posting is only supported for Google right now.">Auto-post unavailable</button>

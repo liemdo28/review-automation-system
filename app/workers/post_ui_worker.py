@@ -81,6 +81,8 @@ def task_post_ui_reply(job_id: int):
         setattr(source, "expected_store_name", location.name)
         provider = get_provider(source, auth_session=auth_session)
 
+        logger.info("[AUTO-REPLY] Launching browser for review %s (%s)", review.id, location.name)
+
         try:
             result = asyncio.run(provider.post_reply(review, reply.ai_reply_text))
         except ProviderAuthRequiredError as exc:

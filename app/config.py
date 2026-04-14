@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # App
     dry_run: bool = True
     fetch_interval_minutes: int = 10
-    process_interval_minutes: int = 1
+    process_interval_minutes: float = 1.0
     max_retries: int = 3
     job_execution_mode: str = "inline"
     log_level: str = "INFO"
