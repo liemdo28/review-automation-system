@@ -265,6 +265,43 @@ function startAutoReplyStatusPolling() {
     }, 2000);
 }
 
+async function toggleAutoReplyPause() {
+    const button = document.getElementById("autoReplyToggleButton");
+    if (!button) return;
+    const isEnabled = button.dataset.enabled === "true";
+    const nextValue = !isEnabled;
+
+    try {
+        const resp = await fetch("/api/admin/auto-reply-config", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auto_post_phase_enabled: nextValue }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            throw new Error(data.detail || "Failed to update auto reply settings.");
+        }
+        button.dataset.enabled = nextValue ? "true" : "false";
+        button.textContent = nextValue ? "Pause Auto Reply" : "Resume Auto Reply";
+        const panel = document.getElementById("autoReplyControlPanel");
+        if (panel) {
+            const title = panel.querySelector("h3");
+            const copy = panel.querySelector(".section-copy");
+            if (title) {
+                title.textContent = nextValue ? "Automation is live" : "Automation paused";
+            }
+            if (copy) {
+                copy.textContent = nextValue
+                    ? "Auto Reply will open the browser and post eligible reviews."
+                    : "Posting is paused. Reviews will stay queued for manual action.";
+            }
+        }
+        showToast(nextValue ? "Auto Reply resumed." : "Auto Reply paused.", "success");
+    } catch (error) {
+        showToast("Failed to update Auto Reply: " + error.message, "error");
+    }
+}
+
 function syncCheckboxesFromSelection() {
     document.querySelectorAll(".review-select").forEach((input) => {
         input.checked = reviewSelection.has(Number(input.value));

@@ -334,6 +334,7 @@ async def reviews_page(
         },
     )
 
+    global_config = await load_global_auto_reply_config(db)
     return templates.TemplateResponse(
         request=request,
         name="reviews.html",
@@ -363,6 +364,7 @@ async def reviews_page(
             "focus_reply": focus_reply,
             "focus_source": focus_source,
             "focus_location": focus_location,
+            "global_auto_reply_config": global_config,
             "store_theme": store_theme_for_location,
             "store_theme_style": store_theme_style,
             **shell_context,

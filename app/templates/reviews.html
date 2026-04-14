@@ -70,6 +70,33 @@
         </div>
         <div class="ai-context-list" id="autoReplyQueueList"></div>
     </div>
+
+    <div class="ai-context-panel" id="autoReplyControlPanel">
+        <div class="section-head compact">
+            <div>
+                <p class="eyebrow">Auto Reply Control</p>
+                <h3>{{ "Automation is live" if (global_auto_reply_config.auto_post_phase_enabled if global_auto_reply_config else False) else "Automation paused" }}</h3>
+                <p class="section-copy">
+                    {% if global_auto_reply_config and global_auto_reply_config.auto_post_phase_enabled %}
+                    Auto Reply will open the browser and post eligible reviews.
+                    {% else %}
+                    Posting is paused. Reviews will stay queued for manual action.
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+        <div class="ai-context-actions">
+            <button
+                type="button"
+                class="btn btn-sm"
+                id="autoReplyToggleButton"
+                data-enabled="{{ 'true' if (global_auto_reply_config.auto_post_phase_enabled if global_auto_reply_config else False) else 'false' }}"
+                onclick="toggleAutoReplyPause()"
+            >
+                {{ "Pause Auto Reply" if (global_auto_reply_config.auto_post_phase_enabled if global_auto_reply_config else False) else "Resume Auto Reply" }}
+            </button>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
