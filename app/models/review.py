@@ -57,7 +57,7 @@ class Review(Base):
     severity_level: Mapped[str | None] = mapped_column(String(16))
     analysis_summary: Mapped[str | None] = mapped_column(Text)
     gm_report_sent: Mapped[bool] = mapped_column(Boolean, default=False)
-    posted_by_mode: Mapped[str | None] = mapped_column(String(16))
+    posted_by_mode: Mapped[str | None] = mapped_column(String(32))
     policy_version: Mapped[str | None] = mapped_column(String(32))
     last_auto_decision_at: Mapped[datetime | None] = mapped_column()
     fetched_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)

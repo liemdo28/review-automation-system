@@ -23,7 +23,7 @@ class Reply(Base):
     risk_flags: Mapped[list[str] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     posted_at: Mapped[datetime | None] = mapped_column()
-    posted_by_mode: Mapped[str | None] = mapped_column(String(16))
+    posted_by_mode: Mapped[str | None] = mapped_column(String(32))
     auto_post_attempts: Mapped[int] = mapped_column(SmallInteger, default=0)
     last_auto_post_error: Mapped[str | None] = mapped_column(Text)
     last_auto_post_at: Mapped[datetime | None] = mapped_column()
