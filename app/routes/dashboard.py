@@ -365,6 +365,7 @@ async def reviews_page(
             "focus_source": focus_source,
             "focus_location": focus_location,
             "global_auto_reply_config": global_config,
+            "dry_run": settings.dry_run,
             "store_theme": store_theme_for_location,
             "store_theme_style": store_theme_style,
             **shell_context,

@@ -92,6 +92,8 @@
                 id="autoReplyToggleButton"
                 data-enabled="{{ 'true' if (global_auto_reply_config.auto_post_phase_enabled if global_auto_reply_config else False) else 'false' }}"
                 onclick="toggleAutoReplyPause()"
+                {% if dry_run %}disabled{% endif %}
+                title="{% if dry_run %}Dry run mode is active.{% else %}Toggle Auto Reply posting on or off.{% endif %}"
             >
                 {{ "Pause Auto Reply" if (global_auto_reply_config.auto_post_phase_enabled if global_auto_reply_config else False) else "Resume Auto Reply" }}
             </button>
@@ -122,7 +124,9 @@
                 <p class="section-copy">Everything in the current filter can be selected, previewed for policy eligibility, and acted on in bulk.</p>
             </div>
             <div class="section-actions">
-                {% if global_auto_reply_config and not global_auto_reply_config.auto_post_phase_enabled %}
+                {% if dry_run %}
+                <span class="status status-failed">Dry run</span>
+                {% elif global_auto_reply_config and not global_auto_reply_config.auto_post_phase_enabled %}
                 <span class="status status-paused">Auto Reply paused</span>
                 {% endif %}
                 <button class="btn btn-secondary" onclick="triggerFetch()">Sync Queue</button>
@@ -362,8 +366,8 @@
                     type="button"
                     class="btn btn-sm"
                     onclick="autoReplyUI({{ item.review.id }})"
-                    {% if not item.review.auto_reply_eligible or not item.source or item.source.session_status != "active" %}disabled{% endif %}
-                    title="{% if not item.review.auto_reply_eligible %}Review is not auto-post eligible.{% elif not item.source or item.source.session_status != 'active' %}Google session must be active before UI posting.{% else %}Start browser UI posting for this review.{% endif %}"
+                {% if dry_run or not item.review.auto_reply_eligible or not item.source or item.source.session_status != "active" %}disabled{% endif %}
+                    title="{% if dry_run %}Dry run mode is active.{% elif not item.review.auto_reply_eligible %}Review is not auto-post eligible.{% elif not item.source or item.source.session_status != 'active' %}Google session must be active before UI posting.{% else %}Start browser UI posting for this review.{% endif %}"
                 >
                     Auto Reply
                 </button>
