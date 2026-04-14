@@ -1433,6 +1433,11 @@ h3 {
     background: rgba(97, 214, 255, 0.12);
 }
 
+.status-paused {
+    color: var(--red);
+    background: rgba(255, 75, 66, 0.14);
+}
+
 .status-unknown,
 .status-missing {
     color: var(--muted);

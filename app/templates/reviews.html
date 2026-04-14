@@ -110,6 +110,9 @@
                 <p class="section-copy">Everything in the current filter can be selected, previewed for policy eligibility, and acted on in bulk.</p>
             </div>
             <div class="section-actions">
+                {% if global_auto_reply_config and not global_auto_reply_config.auto_post_phase_enabled %}
+                <span class="status status-paused">Auto Reply paused</span>
+                {% endif %}
                 <button class="btn btn-secondary" onclick="triggerFetch()">Sync Queue</button>
             </div>
         </div>
