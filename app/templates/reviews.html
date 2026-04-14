@@ -241,6 +241,9 @@
                         {% if item.review.workflow_status and item.review.workflow_status not in [item.status, 'unreplied'] %}
                         <span class="status status-{{ item.review.workflow_status }}">{{ item.review.workflow_status.replace('_', ' ') }}</span>
                         {% endif %}
+                        <span class="status status-queued auto-reply-status-pill is-hidden" id="autoReplyStatus-{{ item.review.id }}">
+                            waiting
+                        </span>
                         {% if item.review.auto_reply_eligible %}
                         <span class="status status-posted">auto eligible</span>
                         {% endif %}

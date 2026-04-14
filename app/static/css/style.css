@@ -1439,6 +1439,16 @@ h3 {
     background: rgba(255, 255, 255, 0.05);
 }
 
+.auto-reply-status-pill {
+    text-transform: none;
+    letter-spacing: 0.02em;
+    font-size: 0.68rem;
+}
+
+.auto-reply-status-pill.is-hidden {
+    display: none;
+}
+
 .star-rating {
     display: inline-flex;
     align-items: center;

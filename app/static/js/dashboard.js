@@ -121,6 +121,121 @@ function updateSelectionUi() {
     if (bulkBar) bulkBar.classList.toggle("is-hidden", count === 0);
 }
 
+const autoReplyStatusKey = "start:auto-reply:pending";
+
+function loadAutoReplyPendingIds() {
+    try {
+        const raw = window.localStorage.getItem(autoReplyStatusKey);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+    } catch (error) {
+        return [];
+    }
+}
+
+function storeAutoReplyPendingIds(ids) {
+    const unique = Array.from(new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id))));
+    if (!unique.length) {
+        window.localStorage.removeItem(autoReplyStatusKey);
+        return;
+    }
+    window.localStorage.setItem(autoReplyStatusKey, JSON.stringify(unique));
+}
+
+function updateAutoReplyStatusPill(reviewId, label, statusClass) {
+    const pill = document.getElementById(`autoReplyStatus-${reviewId}`);
+    if (!pill) return;
+    pill.textContent = label;
+    pill.className = `status ${statusClass} auto-reply-status-pill`;
+}
+
+function mapJobStateToStatus(jobStatus, workflowStatus) {
+    if (workflowStatus === "posted") {
+        return { label: "posted", statusClass: "status-posted" };
+    }
+    if (workflowStatus === "posting_in_ui") {
+        return { label: "posting in ui", statusClass: "status-posting_in_ui" };
+    }
+    if (workflowStatus === "post_verification_required") {
+        return { label: "verify", statusClass: "status-post_verification_required" };
+    }
+    if (workflowStatus === "auto_post_failed") {
+        return { label: "failed", statusClass: "status-auto_post_failed" };
+    }
+    if (workflowStatus === "blocked_auth") {
+        return { label: "auth required", statusClass: "status-blocked_auth" };
+    }
+    if (jobStatus === "processing") {
+        return { label: "opening browser", statusClass: "status-processing" };
+    }
+    if (jobStatus === "queued") {
+        return { label: "waiting", statusClass: "status-queued" };
+    }
+    if (jobStatus === "failed") {
+        return { label: "failed", statusClass: "status-failed" };
+    }
+    if (jobStatus === "completed") {
+        return { label: "posted", statusClass: "status-posted" };
+    }
+    return { label: "waiting", statusClass: "status-queued" };
+}
+
+async function fetchReviewJobStatus(reviewId) {
+    const resp = await fetch(`/api/reviews/${reviewId}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+        throw new Error(data.detail || "Failed to load review status.");
+    }
+    const jobs = data.jobs || [];
+    const postJob = jobs.find((job) => job.job_type === "post_ui_reply");
+    const workflowStatus = (data.review && data.review.workflow_status) || data.review_status;
+    return {
+        jobStatus: postJob ? postJob.status : null,
+        workflowStatus: workflowStatus || null,
+    };
+}
+
+function renderAutoReplyPendingState(reviewId, state) {
+    if (!state) return;
+    const { jobStatus, workflowStatus } = state;
+    const mapped = mapJobStateToStatus(jobStatus, workflowStatus);
+    updateAutoReplyStatusPill(reviewId, mapped.label, mapped.statusClass);
+}
+
+function startAutoReplyStatusPolling() {
+    const pendingIds = loadAutoReplyPendingIds();
+    if (!pendingIds.length) return;
+
+    const remaining = new Set(pendingIds);
+    pendingIds.forEach((id) => updateAutoReplyStatusPill(id, "waiting", "status-queued"));
+
+    let attempts = 0;
+    const maxAttempts = 45;
+    const interval = window.setInterval(async () => {
+        attempts += 1;
+        const ids = Array.from(remaining);
+        await Promise.all(
+            ids.map(async (reviewId) => {
+                try {
+                    const state = await fetchReviewJobStatus(reviewId);
+                    renderAutoReplyPendingState(reviewId, state);
+                    if (state.workflowStatus === "posted" || state.jobStatus === "failed") {
+                        remaining.delete(reviewId);
+                    }
+                } catch (error) {
+                    // keep polling; transient failures happen during reloads
+                }
+            }),
+        );
+        if (!remaining.size || attempts >= maxAttempts) {
+            window.clearInterval(interval);
+            storeAutoReplyPendingIds(Array.from(remaining));
+        }
+    }, 2000);
+}
+
 function syncCheckboxesFromSelection() {
     document.querySelectorAll(".review-select").forEach((input) => {
         input.checked = reviewSelection.has(Number(input.value));
@@ -289,6 +404,7 @@ async function bulkAutoReplyUI() {
             `Auto Reply started for ${data.queued_count} review${data.queued_count === 1 ? "" : "s"}. Browser posting will run sequentially.`,
             "success",
         );
+        storeAutoReplyPendingIds((data.queued_jobs || []).map((item) => item.review_id));
         hideAutoReplyPreview();
         clearReviewSelection();
         location.reload();
@@ -368,6 +484,7 @@ function setupRatingFilterControls() {
 document.addEventListener("DOMContentLoaded", () => {
     updateSelectionUi();
     setupRatingFilterControls();
+    startAutoReplyStatusPolling();
 });
 
 async function bulkMarkHandled() {
@@ -464,6 +581,7 @@ async function autoReplyUI(reviewId) {
         window.setTimeout(() => {
             showToast("Opening browser to post the reply...", "info");
         }, 1200);
+        storeAutoReplyPendingIds([reviewId]);
         location.reload();
     } catch (error) {
         showToast("Failed to start UI posting: " + error.message, "error");
