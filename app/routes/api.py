@@ -525,10 +525,6 @@ async def stats(db: AsyncSession = Depends(get_db)):
             )
         ).scalar()
         or 0,
-        "escalated_reviews": (
-            await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "escalated"))
-        ).scalar()
-        or 0,
         "blocked_auth_reviews": (
             await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "blocked_auth"))
         ).scalar()

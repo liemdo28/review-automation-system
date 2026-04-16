@@ -26,6 +26,33 @@ logger = logging.getLogger("review_system")
 scheduler = AsyncIOScheduler()
 
 
+def _configure_scheduler_jobs() -> None:
+    """Register scheduler jobs exactly once for the current app process."""
+    existing_jobs = {job.id for job in scheduler.get_jobs()}
+
+    if "fetch_reviews" not in existing_jobs:
+        scheduler.add_job(
+            fetch_all_reviews,
+            "interval",
+            minutes=settings.fetch_interval_minutes,
+            id="fetch_reviews",
+            name="Fetch reviews from Google + Yelp",
+            max_instances=1,
+            replace_existing=True,
+        )
+
+    if "process_queue" not in existing_jobs:
+        scheduler.add_job(
+            _run_process_worker,
+            "interval",
+            minutes=settings.process_interval_minutes,
+            id="process_queue",
+            name="Process job queue",
+            max_instances=1,
+            replace_existing=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -33,32 +60,20 @@ async def lifespan(app: FastAPI):
     logger.info(f"DRY_RUN={settings.dry_run}")
     logger.info(f"Fetch interval: {settings.fetch_interval_minutes}m")
 
-    scheduler.add_job(
-        fetch_all_reviews,
-        "interval",
-        minutes=settings.fetch_interval_minutes,
-        id="fetch_reviews",
-        name="Fetch reviews from Google + Yelp",
-        max_instances=1,
-    )
+    _configure_scheduler_jobs()
 
-    scheduler.add_job(
-        _run_process_worker,
-        "interval",
-        minutes=settings.process_interval_minutes,
-        id="process_queue",
-        name="Process job queue",
-        max_instances=1,
-    )
-
-    scheduler.start()
-    logger.info("Scheduler started")
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("Scheduler started")
+    else:
+        logger.info("Scheduler already running; skipped duplicate startup")
 
     yield
 
     # Shutdown
-    scheduler.shutdown(wait=False)
-    logger.info("START shut down")
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("START shut down")
 
 
 async def _run_process_worker():

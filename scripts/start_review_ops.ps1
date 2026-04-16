@@ -18,6 +18,34 @@ function Invoke-Checked {
     }
 }
 
+function Wait-ForTcpPort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Host,
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [int]$TimeoutSeconds = 45,
+        [string]$Label = "service"
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $client = New-Object System.Net.Sockets.TcpClient
+            $task = $client.ConnectAsync($Host, $Port)
+            if ($task.Wait(1000) -and $client.Connected) {
+                $client.Close()
+                return
+            }
+            $client.Close()
+        } catch {
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw "Timed out waiting for $Label on $Host`:$Port"
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
@@ -81,6 +109,8 @@ try {
 if ($dockerAvailable) {
     Write-Host "Starting PostgreSQL and Redis..."
     docker compose up -d postgres redis | Out-Host
+    Wait-ForTcpPort -Host "127.0.0.1" -Port 5432 -Label "PostgreSQL"
+    Wait-ForTcpPort -Host "127.0.0.1" -Port 6379 -Label "Redis"
 }
 
 Write-Host "Running database migrations..."
@@ -121,6 +151,14 @@ $process = Start-Process `
 Set-Content -Path $webPidPath -Value $process.Id
 
 Start-Sleep -Seconds 4
+
+if ($process.HasExited) {
+    $stderr = ""
+    if (Test-Path $webErrPath) {
+        $stderr = Get-Content $webErrPath -Raw
+    }
+    throw "START exited immediately after launch. $stderr"
+}
 
 if ($OpenBrowser) {
     Start-Process "http://127.0.0.1:$Port"

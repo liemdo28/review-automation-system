@@ -351,6 +351,12 @@ async def reviews_page(
             ],
         },
     )
+    shell_counts = shell_context.setdefault("shell_counts", {})
+    queue_blocking_summary = shell_counts.setdefault("queue_blocking_summary", {})
+    queue_blocking_summary.setdefault("login_required", 0)
+    queue_blocking_summary.setdefault("draft_missing", 0)
+    queue_blocking_summary.setdefault("escalated", 0)
+    queue_blocking_summary.setdefault("policy_blocked", 0)
 
     global_config = await load_global_auto_reply_config(db)
     return templates.TemplateResponse(

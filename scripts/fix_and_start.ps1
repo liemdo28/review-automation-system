@@ -14,6 +14,34 @@ if (-not (Test-Path $runDir)) {
 }
 $errorLog = Join-Path $runDir "fix.err.log"
 
+function Wait-ForTcpPort {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Host,
+        [Parameter(Mandatory = $true)]
+        [int]$Port,
+        [int]$TimeoutSeconds = 45,
+        [string]$Label = "service"
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $client = New-Object System.Net.Sockets.TcpClient
+            $task = $client.ConnectAsync($Host, $Port)
+            if ($task.Wait(1000) -and $client.Connected) {
+                $client.Close()
+                return
+            }
+            $client.Close()
+        } catch {
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    throw "Timed out waiting for $Label on $Host`:$Port"
+}
+
 try {
     if (Test-Path $errorLog) {
         Remove-Item $errorLog -Force
@@ -41,16 +69,24 @@ try {
     }
 
     docker compose up -d postgres redis | Out-Null
-    Start-Sleep -Seconds 4
+    Wait-ForTcpPort -Host "127.0.0.1" -Port 5432 -Label "PostgreSQL"
+    Wait-ForTcpPort -Host "127.0.0.1" -Port 6379 -Label "Redis"
 
     $venvDir = Join-Path $repoRoot ".venv"
     $pythonExe = Join-Path $venvDir "Scripts\\python.exe"
     $alembicExe = Join-Path $venvDir "Scripts\\alembic.exe"
+    $pipExe = Join-Path $venvDir "Scripts\\pip.exe"
 
     if (-not (Test-Path $pythonExe)) {
         Write-Host "Virtual environment missing, running start script to create it..."
         & "$repoRoot\\start.bat"
         exit 0
+    }
+
+    if (-not (Test-Path $alembicExe)) {
+        Write-Host "Alembic missing in virtual environment, reinstalling dependencies..."
+        & $pythonExe -m pip install --upgrade pip
+        & $pipExe install -e .
     }
 
     Write-Host "Applying database migrations..."
