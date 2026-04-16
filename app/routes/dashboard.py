@@ -91,12 +91,30 @@ async def _build_shell_counts(db: AsyncSession) -> dict[str, int]:
             select(func.count()).select_from(Review).where(Review.workflow_status == "manual_review_required")
         )
     ).scalar() or 0
+    # --- queue blocking breakdown ---
+    needs_login = (
+        await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "blocked_auth"))
+    ).scalar() or 0
+    needs_draft = (
+        await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "unreplied"))
+    ).scalar() or 0
+    escalated_count = escalated or 0
+    policy_blocked = (
+        await db.execute(select(func.count()).select_from(Review).where(Review.workflow_status == "manual_review_required"))
+    ).scalar() or 0
     return {
         "queue": queue_count,
         "auto_eligible": auto_eligible,
         "escalated": escalated,
         "auth_blocked": auth_blocked,
         "manual_review": manual_review,
+        # New: queue blocking breakdown — used by reviews.html onboarding banner
+        "queue_blocking_summary": {
+            "login_required": needs_login,
+            "draft_missing": needs_draft,
+            "escalated": escalated_count,
+            "policy_blocked": policy_blocked,
+        },
     }
 
 

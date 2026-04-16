@@ -22,17 +22,34 @@
                 <p class="eyebrow">Auto Reply Control</p>
                 <h2>{{ eligible_items|length }} reviews are ready, {{ blocked_items|length }} are blocked by auth, and {{ failed_items|length }} recently failed.</h2>
                 <p class="section-copy">Use this workspace to run safe review batches only when sessions, policy, and tone settings are all aligned.</p>
+                {% if blocked_items|length > 0 %}
+                <div class="blocking-hints-row">
+                    <span class="blocking-chip blocking-chip-warn">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        {{ blocked_items|length }} blocked by login
+                    </span>
+                    {% if healthy_sources == 0 and paused_sources > 0 %}
+                    <a href="/locations" class="btn btn-sm" style="margin-left: auto">Login to sources →</a>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
             <div class="section-actions">
-                <button class="btn" onclick="triggerFetch()" {% if dry_run %}disabled title="Dry run mode is active."{% endif %}>Run now</button>
+                <button class="btn" onclick="triggerFetch()" {% if dry_run %}disabled title="Dry run mode is active."{% endif %}>Sync reviews</button>
+                <a href="/locations" class="btn btn-secondary">Sources</a>
                 <a href="/admin/auto-reply" class="btn btn-secondary">Open policy settings</a>
+                {% if failed_items|length > 0 %}
                 <a href="/reviews?status=auto_post_failed" class="btn btn-secondary">Retry failed</a>
+                {% endif %}
             </div>
         </div>
         <div class="metric-grid compact-metrics">
             <article class="metric-tile"><span class="metric-label">Eligible queue</span><strong class="metric-value">{{ eligible_items|length }}</strong></article>
             <article class="metric-tile accent-neutral"><span class="metric-label">Healthy sources</span><strong class="metric-value">{{ healthy_sources }}</strong></article>
-            <article class="metric-tile accent-warning"><span class="metric-label">Paused / blocked</span><strong class="metric-value">{{ paused_sources }}</strong></article>
+            <article class="metric-tile accent-warning"><span class="metric-label">Login needed</span><strong class="metric-value">{{ paused_sources }}</strong></article>
+            {% if failed_items|length > 0 %}
+            <article class="metric-tile accent-error"><span class="metric-label">Failed (retry)</span><strong class="metric-value">{{ failed_items|length }}</strong></article>
+            {% endif %}
         </div>
     </div>
 </section>
